@@ -700,6 +700,7 @@ body {
 .chart-detail-row:hover { background: var(--hover); }
 .chart-detail-row-ts { font-size: 0.7rem; color: var(--muted); margin-bottom: 2px; font-family: monospace; }
 .chart-detail-row-body { font-size: 0.8rem; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chart-detail-row-sub { font-size: 0.73rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 
 .raw-log-toolbar {
   display: flex;

@@ -859,29 +859,47 @@ function showChartDetail(title, matchingRows) {
     item.className = 'chart-detail-row';
     item.style.cursor = 'pointer';
 
-    // Pick the most meaningful fields to show in the mini row
-    const ts   = row.TIMESTAMP || '';
-    const user = row.USER_ID_DERIVED || row.USER_ID || '';
+    const ts       = row.TIMESTAMP || row.TIMESTAMP_DERIVED || '';
+    const user     = row.USER_ID_DERIVED || row.USER_ID || '';
     const userName = user ? (currentUserMap[user] || user) : '';
-    const rt   = row.RUN_TIME || row.EXEC_TIME || '';
-    const exc  = row.EXCEPTION_TYPE || row.ERROR_CODE || '';
-    const uri  = row.URI || row.ENTRY_POINT || row.PAGE_APP_NAME || '';
+    const rt       = row.RUN_TIME || row.EXEC_TIME || '';
+    const exc      = row.EXCEPTION_TYPE || row.ERROR_CODE || '';
+    const excMsg   = truncateMsg(row.EXCEPTION_MESSAGE || '', 80);
+    const excCat   = row.EXCEPTION_CATEGORY || '';
+    const cls      = row.APEX_ENTITY_NAME || row.ENTITY_NAME || '';
+    const uri      = row.URI || row.ENTRY_POINT || row.PAGE_APP_NAME || '';
 
+    // Timestamp
     const tsEl = document.createElement('div');
     tsEl.className = 'chart-detail-row-ts';
-    tsEl.textContent = ts ? ts.substring(0, 19).replace(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/, '$1-$2-$3 $4:$5:$6') : '—';
+    const tsClean = ts.includes('-') ? ts.substring(0, 19).replace('T', ' ')
+                  : ts.substring(0, 19).replace(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/, '$1-$2-$3 $4:$5:$6');
+    tsEl.textContent = tsClean || '—';
 
+    // Primary line
     const bodyEl = document.createElement('div');
     bodyEl.className = 'chart-detail-row-body';
-    const parts = [uri, userName, rt ? rt + ' ms' : ''].filter(Boolean);
-    bodyEl.textContent = parts.join(' · ');
     if (exc) {
       bodyEl.style.color = 'var(--red)';
-      bodyEl.textContent = exc + (uri ? ' · ' + uri : '');
+      const tag = excCat ? exc + ' · ' + excCat : exc;
+      bodyEl.textContent = tag + (cls ? ' in ' + cls : '') + (uri ? ' · ' + uri : '');
+    } else {
+      const parts = [uri || cls, userName, rt ? rt + ' ms' : ''].filter(Boolean);
+      bodyEl.textContent = parts.join(' · ');
+    }
+
+    // Secondary line: message or user
+    const subEl = document.createElement('div');
+    subEl.className = 'chart-detail-row-sub';
+    if (excMsg) {
+      subEl.textContent = excMsg;
+    } else if (userName) {
+      subEl.textContent = userName;
     }
 
     item.appendChild(tsEl);
     item.appendChild(bodyEl);
+    if (subEl.textContent) item.appendChild(subEl);
     item.addEventListener('click', () => showRowDetail(row));
     panel.appendChild(item);
   });
