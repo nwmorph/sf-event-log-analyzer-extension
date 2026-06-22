@@ -229,8 +229,13 @@ function renderFileList() {
       intervalEl.className = 'log-file-interval';
       intervalEl.textContent = f.Interval || '';
 
+      const sizeEl = document.createElement('span');
+      sizeEl.className = 'log-file-size';
+      sizeEl.textContent = formatBytes(f.LogFileLength || 0);
+
       row.appendChild(dateEl);
       if (f.Interval) row.appendChild(intervalEl);
+      row.appendChild(sizeEl);
       row.addEventListener('click', () => selectFile(row));
       filesDiv.appendChild(row);
     });
