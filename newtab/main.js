@@ -70,6 +70,7 @@ function pct(v, total) { return total > 0 ? Math.round(v/total*100) : 0; }
 let currentCsvData = null;   // { headers, rows }
 let currentCsvText = '';     // raw CSV text for the Raw CSV tab
 let currentLoadId = 0;       // increments each time a new log is loaded
+let currentUserMap = {};     // { userId: 'Full Name' }
 let filteredRows = [];        // after search + quick filters
 let activeQuickFilters = new Set();
 let sortCol = null;
@@ -77,10 +78,11 @@ let sortDir = 'asc';
 let currentEventType = '';
 
 // ── Entry point ────────────────────────────────────────────────────────────
-function analyseEventLog(csvText, eventType, meta) {
+function analyseEventLog(csvText, eventType, meta, userMap) {
   currentEventType = eventType || '';
   currentCsvText = csvText || '';
   currentLoadId++;
+  currentUserMap = userMap || {};
   currentCsvData = parseCsv(csvText);
   filteredRows = [...currentCsvData.rows];
   activeQuickFilters.clear();
@@ -261,7 +263,10 @@ function renderApexExceptionOverview(rows, headers) {
   const total = rows.length;
   const types = topN(rows, 'EXCEPTION_TYPE');
   const classes = topN(rows, 'ENTITY_NAME');
-  const users = topN(rows, 'USER_ID_DERIVED', 5);
+  const userCounts = {};
+  rows.forEach(r => { const id = r.USER_ID_DERIVED || '(unknown)'; userCounts[id] = (userCounts[id] || 0) + 1; });
+  const users = Object.entries(userCounts).sort((a,b) => b[1]-a[1]).slice(0, 5)
+    .map(([id, count]) => [formatUser(id), count]);
 
   return statCards([
     { label: 'Total Exceptions', value: total.toLocaleString(), cls: total > 0 ? 'red' : 'green' },
@@ -326,24 +331,102 @@ function renderApiUsageOverview(rows, headers) {
   + topNSection('Top Users', users, total);
 }
 
+const QUIDDITY_LABELS = {
+  A: 'Synchronous Apex',
+  B: 'Batch Apex',
+  C: 'Scheduled Apex',
+  D: 'Apex Class',
+  E: 'Inbound Email',
+  F: 'Future Method',
+  H: 'Visualforce HTTP Request',
+  I: 'Invocable Action',
+  K: 'Quick Action',
+  L: 'Lightning (Aura/LWC)',
+  M: 'Remote Action',
+  N: 'Synchronous',
+  P: 'Apex REST',
+  Q: 'SOAP Web Service',
+  R: 'REST API',
+  S: 'Standard API',
+  T: 'Trigger',
+  V: 'Visualforce',
+  W: 'SOAP API',
+  X: 'Execute Anonymous',
+};
+
+function formatUser(id) {
+  return currentUserMap[id] ? currentUserMap[id] + ' (' + id + ')' : id;
+}
+
 function renderApexExecutionOverview(rows, headers) {
-  const total = rows.length;
+  const total  = rows.length;
   const avgRt  = total ? Math.round(rows.reduce((s, r) => s + parseInt(r.EXEC_TIME || r.RUN_TIME || 0), 0) / total) : 0;
   const avgCpu = total ? Math.round(rows.reduce((s, r) => s + parseInt(r.CPU_TIME || 0), 0) / total) : 0;
   const slow   = rows.filter(r => parseInt(r.EXEC_TIME || r.RUN_TIME || 0) > 1000).length;
-  const users  = topN(rows, 'USER_ID_DERIVED', 8);
-  const entry  = topN(rows, 'ENTRY_POINT', 8);
-  const quanta = topN(rows, 'QUIDDITY', 8);
+  const errors = rows.filter(r => r.IS_LONG_RUNNING_REQUEST === '1' || r.EXCEPTION_TYPE || parseInt(r.NUMBER_EXCEPTION_THROWN || 0) > 0);
+  const hasErrors = errors.length > 0;
 
-  return statCards([
-    { label: 'Executions', value: total.toLocaleString() },
-    { label: 'Avg Exec Time', value: avgRt + ' ms', cls: avgRt > 1000 ? 'amber' : '' },
-    { label: 'Avg CPU Time', value: avgCpu + ' ms', cls: avgCpu > 500 ? 'amber' : '' },
-    { label: 'Slow (>1s)', value: slow.toLocaleString(), cls: slow > 0 ? 'amber' : 'green' },
-  ])
-  + (entry.length  ? topNSection('Top Entry Points', entry, total) : '')
-  + (quanta.length ? topNSection('Execution Type (Quiddity)', quanta, total) : '')
-  + (users.length  ? topNSection('Most Active Users', users, total, 'var(--amber)') : '');
+  // User top-N with resolved names
+  const userCounts = {};
+  rows.forEach(r => { const id = r.USER_ID_DERIVED || '(unknown)'; userCounts[id] = (userCounts[id] || 0) + 1; });
+  const users = Object.entries(userCounts).sort((a,b) => b[1]-a[1]).slice(0, 8)
+    .map(([id, count]) => [formatUser(id), count]);
+
+  // Quiddity with human-readable labels
+  const qCounts = {};
+  rows.forEach(r => { const q = r.QUIDDITY || ''; if (q) qCounts[q] = (qCounts[q] || 0) + 1; });
+  const quanta = Object.entries(qCounts).sort((a,b) => b[1]-a[1]).slice(0, 8)
+    .map(([code, count]) => [QUIDDITY_LABELS[code] ? QUIDDITY_LABELS[code] + ' (' + code + ')' : code, count]);
+
+  const entry = topN(rows, 'ENTRY_POINT', 8);
+
+  // Summary narrative
+  const summaryLines = [];
+  summaryLines.push(total + ' Apex execution' + (total !== 1 ? 's' : '') + ' recorded.');
+  if (avgRt > 0) summaryLines.push('Average execution time was ' + avgRt + ' ms' + (avgRt > 1000 ? ' — above the 1s threshold.' : '.'));
+  if (avgCpu > 0) summaryLines.push('Average CPU time was ' + avgCpu + ' ms' + (avgCpu > 500 ? ' — approaching governor limits.' : '.'));
+  if (slow > 0) summaryLines.push(slow + ' execution' + (slow !== 1 ? 's' : '') + ' exceeded 1 second.');
+  if (hasErrors) summaryLines.push(errors.length + ' execution' + (errors.length !== 1 ? 's' : '') + ' involved exceptions or long-running requests.');
+  const topEntry = entry[0];
+  if (topEntry) summaryLines.push('Most frequent entry point: ' + topEntry[0] + ' (' + topEntry[1] + ' time' + (topEntry[1] !== 1 ? 's' : '') + ').');
+
+  const summaryHtml = `<div class="overview-section overview-summary">
+    <div class="overview-section-title">Summary</div>
+    ${summaryLines.map(l => `<p class="summary-line">${escapeHtml(l)}</p>`).join('')}
+  </div>`;
+
+  // Errors / exceptions section
+  let errorsHtml = '';
+  if (hasErrors) {
+    errorsHtml = `<div class="overview-section overview-errors">
+      <div class="overview-section-title overview-section-title--error">⚠ Exceptions &amp; Issues</div>
+      ${errors.slice(0, 20).map(r => {
+        const who  = formatUser(r.USER_ID_DERIVED || '');
+        const when = r.TIMESTAMP ? r.TIMESTAMP.substring(0, 19).replace('T', ' ') : '';
+        const exc  = r.EXCEPTION_TYPE || '';
+        const entry2 = r.ENTRY_POINT || '';
+        const rt   = r.EXEC_TIME || r.RUN_TIME || '';
+        return `<div class="error-row">
+          <span class="error-tag">${escapeHtml(exc || 'Long-running')}</span>
+          <span class="error-detail">${escapeHtml(entry2)}</span>
+          <span class="error-meta">${escapeHtml(who)}${when ? ' · ' + when : ''}${rt ? ' · ' + rt + ' ms' : ''}</span>
+        </div>`;
+      }).join('')}
+      ${errors.length > 20 ? `<p class="summary-line" style="color:var(--muted)">…and ${errors.length - 20} more. Use the Table tab to see all.</p>` : ''}
+    </div>`;
+  }
+
+  return summaryHtml
+    + statCards([
+        { label: 'Executions', value: total.toLocaleString() },
+        { label: 'Avg Exec Time', value: avgRt + ' ms', cls: avgRt > 1000 ? 'amber' : '' },
+        { label: 'Avg CPU Time', value: avgCpu + ' ms', cls: avgCpu > 500 ? 'amber' : '' },
+        { label: 'Slow (>1s)', value: slow.toLocaleString(), cls: slow > 0 ? 'amber' : 'green' },
+      ])
+    + errorsHtml
+    + (entry.length   ? topNSection('Top Entry Points', entry, total) : '')
+    + (quanta.length  ? topNSection('Execution Type', quanta, total) : '')
+    + (users.length   ? topNSection('Most Active Users', users, total, 'var(--amber)') : '');
 }
 
 function renderGenericOverview(rows, headers) {

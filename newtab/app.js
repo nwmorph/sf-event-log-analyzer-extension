@@ -2,6 +2,7 @@
 let orgUrl = '';
 let allFiles = [];      // raw EventLogFile records from last fetch
 let selectedFileId = null;
+let userNames = {};     // { userId: 'Full Name' }
 
 // ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -102,6 +103,8 @@ async function doRefresh() {
       renderFileList();
       showOrgLabel(orgUrl);
       showMainEmpty();
+      // Fetch user names in the background — overviews will use them when ready
+      prefetchUsers();
     }
   );
 }
@@ -264,9 +267,39 @@ function selectFile(rowEl) {
         showMainError(response.error || 'Failed to download log file.');
         return;
       }
-      analyseEventLog(response.text, type, { date, interval, size });
+      // Extract user IDs from CSV before rendering so overviews show names
+      const userIdCol = response.text.split('\n')[0].split(',').find(h => h.trim().replace(/"/g,'') === 'USER_ID_DERIVED');
+      if (userIdCol) {
+        const parsed = response.text.split(/\r?\n/).slice(1);
+        const colIdx = response.text.split('\n')[0].split(',').map(h => h.trim().replace(/"/g,'')).indexOf('USER_ID_DERIVED');
+        const ids = [...new Set(parsed.map(l => l.split(',')[colIdx]?.trim().replace(/"/g,'')).filter(Boolean))];
+        fetchUserNamesForIds(ids).then(() => analyseEventLog(response.text, type, { date, interval, size }, userNames));
+      } else {
+        analyseEventLog(response.text, type, { date, interval, size }, userNames);
+      }
     }
   );
+}
+
+// ── User name prefetch ─────────────────────────────────────────────────────
+function prefetchUsers() {
+  // Collect unique 15/18-char user IDs from the file list (CreatedById not present,
+  // so we'll resolve from CSV rows lazily — just seed with an empty map for now
+  // and let the CSV fetch trigger a lookup of the IDs actually in that file)
+  userNames = {};
+}
+
+function fetchUserNamesForIds(ids) {
+  const unknown = ids.filter(id => id && !userNames[id]);
+  if (unknown.length === 0) return Promise.resolve();
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({ type: 'fetchUsers', orgUrl, ids: unknown }, (response) => {
+      if (!chrome.runtime.lastError && response && response.ok) {
+        Object.assign(userNames, response.map);
+      }
+      resolve();
+    });
+  });
 }
 
 // ── Main content state helpers ─────────────────────────────────────────────

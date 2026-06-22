@@ -31,6 +31,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ ok: false, error: err.message }));
     return true;
   }
+
+  if (message.type === 'fetchUsers') {
+    fetchUsers(message.orgUrl, message.ids)
+      .then(map => sendResponse({ ok: true, map }))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
 });
 
 // ── URL helpers ────────────────────────────────────────────────────────────
@@ -106,4 +113,20 @@ async function fetchEventLogCsv(orgUrl, logId) {
   const text = await res.text();
   csvCache[logId] = text;
   return text;
+}
+
+async function fetchUsers(orgUrl, ids) {
+  if (!ids || ids.length === 0) return {};
+  const sid = await getSessionToken(orgUrl);
+  const apiUrl = toApiUrl(orgUrl);
+  const idList = ids.slice(0, 200).map(id => `'${id}'`).join(',');
+  const q = encodeURIComponent(`SELECT Id, Name FROM User WHERE Id IN (${idList}) LIMIT 200`);
+  const res = await fetch(`${apiUrl}/services/data/${API_VERSION}/query/?q=${q}`, {
+    headers: { 'Authorization': `Bearer ${sid}` }
+  });
+  if (!res.ok) return {};
+  const data = await res.json();
+  const map = {};
+  (data.records || []).forEach(u => { map[u.Id] = u.Name; });
+  return map;
 }
