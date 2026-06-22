@@ -103,6 +103,10 @@ function analyseEventLog(csvText, eventType, meta) {
       btn.classList.add('active');
       const panel = document.getElementById('tab-' + btn.getAttribute('data-tab'));
       if (panel) panel.classList.add('active');
+      // Render the newly activated tab
+      renderOverview();
+      renderTable();
+      renderCharts();
     };
   });
 
@@ -188,6 +192,9 @@ function renderOverviewForType(eventType, rows, headers) {
 
   if (type === 'APEXUNEXPECTEDEXCEPTION' || type === 'APEX_UNEXPECTED_EXCEPTION') {
     return renderApexExceptionOverview(rows, headers);
+  }
+  if (type === 'APEXEXECUTION') {
+    return renderApexExecutionOverview(rows, headers);
   }
   if (type === 'RESTAPI' || type === 'REST_API' || type === 'AURA_REQUEST' || type === 'AURAREQUEST') {
     return renderApiOverview(rows, headers, type);
@@ -295,10 +302,36 @@ function renderApiUsageOverview(rows, headers) {
   + topNSection('Top Users', users, total);
 }
 
+function renderApexExecutionOverview(rows, headers) {
+  const total = rows.length;
+  const avgRt  = total ? Math.round(rows.reduce((s, r) => s + parseInt(r.EXEC_TIME || r.RUN_TIME || 0), 0) / total) : 0;
+  const avgCpu = total ? Math.round(rows.reduce((s, r) => s + parseInt(r.CPU_TIME || 0), 0) / total) : 0;
+  const slow   = rows.filter(r => parseInt(r.EXEC_TIME || r.RUN_TIME || 0) > 1000).length;
+  const users  = topN(rows, 'USER_ID_DERIVED', 8);
+  const entry  = topN(rows, 'ENTRY_POINT', 8);
+  const quanta = topN(rows, 'QUIDDITY', 8);
+
+  return statCards([
+    { label: 'Executions', value: total.toLocaleString() },
+    { label: 'Avg Exec Time', value: avgRt + ' ms', cls: avgRt > 1000 ? 'amber' : '' },
+    { label: 'Avg CPU Time', value: avgCpu + ' ms', cls: avgCpu > 500 ? 'amber' : '' },
+    { label: 'Slow (>1s)', value: slow.toLocaleString(), cls: slow > 0 ? 'amber' : 'green' },
+  ])
+  + (entry.length  ? topNSection('Top Entry Points', entry, total) : '')
+  + (quanta.length ? topNSection('Execution Type (Quiddity)', quanta, total) : '')
+  + (users.length  ? topNSection('Most Active Users', users, total, 'var(--amber)') : '');
+}
+
 function renderGenericOverview(rows, headers) {
   if (rows.length === 0) return '<p style="color:var(--muted);padding:20px">No records.</p>';
   const numericCols = headers.filter(h => rows.slice(0,20).every(r => r[h] === '' || !isNaN(Number(r[h]))));
-  const stringCols  = headers.filter(h => !numericCols.includes(h)).slice(0, 6);
+  // Skip high-cardinality columns (IDs, keys, timestamps) — they produce useless top-N lists
+  const HIGH_CARDINALITY = /^(REQUEST_ID|SESSION_KEY|TIMESTAMP|ID|UUID|CORRELATION|TRANSACTION)/i;
+  const stringCols = headers.filter(h =>
+    !numericCols.includes(h) &&
+    !HIGH_CARDINALITY.test(h) &&
+    new Set(rows.map(r => r[h])).size < rows.length * 0.9
+  ).slice(0, 6);
   let html = statCards([
     { label: 'Total Records', value: rows.length.toLocaleString() },
     { label: 'Columns', value: headers.length },
