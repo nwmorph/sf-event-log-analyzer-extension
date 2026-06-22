@@ -65,8 +65,8 @@ async function fetchEventLogFiles(orgUrl, startDate, endDate, eventType) {
 
   let where = '';
   const conditions = [];
-  if (startDate) conditions.push(`LogDate >= ${startDate}`);
-  if (endDate)   conditions.push(`LogDate <= ${endDate}`);
+  if (startDate) conditions.push(`LogDate >= ${startDate}T00:00:00Z`);
+  if (endDate)   conditions.push(`LogDate <= ${endDate}T23:59:59Z`);
   if (eventType) conditions.push(`EventType = '${eventType.replace(/'/g, "\\'")}'`);
   if (conditions.length) where = `WHERE ${conditions.join(' AND ')}`;
 
