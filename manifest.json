@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "SF Event Log Analyzer",
+  "description": "Analyse Salesforce Event Log Files — exceptions, API calls, login patterns and more.",
+  "version": "1.0.0",
+  "author": "Niklas Waller",
+
+  "permissions": [
+    "tabs",
+    "cookies",
+    "storage",
+    "activeTab"
+  ],
+
+  "host_permissions": [
+    "https://*.salesforce.com/*",
+    "https://*.force.com/*",
+    "https://*.lightning.force.com/*",
+    "https://*.my.salesforce.com/*",
+    "https://*.sandbox.my.salesforce.com/*",
+    "https://*.develop.my.salesforce.com/*",
+    "https://*.scratch.my.salesforce.com/*",
+    "https://*.visual.force.com/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.salesforce.com/*",
+        "https://*.force.com/*",
+        "https://*.lightning.force.com/*",
+        "https://*.my.salesforce.com/*",
+        "https://*.sandbox.my.salesforce.com/*",
+        "https://*.develop.my.salesforce.com/*",
+        "https://*.scratch.my.salesforce.com/*",
+        "https://*.visual.force.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "action": {
+    "default_title": "SF Event Log Analyzer",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}

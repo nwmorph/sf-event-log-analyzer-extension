@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SF Event Log Analyzer</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="ext-layout">
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-title">⚡ SF Event Log Analyzer</div>
+        <div class="sidebar-org" id="sidebar-org">Not connected</div>
+      </div>
+
+      <!-- Filters -->
+      <div class="sidebar-filters">
+        <div class="filter-row">
+          <label class="filter-label">From</label>
+          <input type="date" id="filter-start" class="filter-input" />
+        </div>
+        <div class="filter-row">
+          <label class="filter-label">To</label>
+          <input type="date" id="filter-end" class="filter-input" />
+        </div>
+        <div class="filter-row">
+          <label class="filter-label">Type</label>
+          <select id="filter-type" class="filter-input">
+            <option value="">All types</option>
+          </select>
+        </div>
+        <div class="filter-row">
+          <label class="filter-label">Interval</label>
+          <select id="filter-interval" class="filter-input">
+            <option value="">All</option>
+            <option value="Hourly">Hourly</option>
+            <option value="Daily">Daily</option>
+          </select>
+        </div>
+        <button class="btn-primary" id="btn-refresh">↺ Refresh</button>
+      </div>
+
+      <!-- File list -->
+      <div class="sidebar-list-header">
+        <span id="sidebar-file-count"></span>
+      </div>
+      <div class="sidebar-list" id="sidebar-list">
+        <div class="list-placeholder">
+          <div class="placeholder-icon">📋</div>
+          <p>Open a Salesforce org tab, then click Refresh.</p>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Resizer -->
+    <div id="sidebar-resizer" class="sidebar-resizer"></div>
+
+    <!-- Main content -->
+    <main class="main-content" id="main-content">
+      <div id="main-empty" class="main-empty">
+        <div class="empty-icon">📊</div>
+        <h2>No event log selected</h2>
+        <p>Select an event log file from the list to analyse it.</p>
+      </div>
+      <div id="main-analysis" style="display:none;">
+        <div class="analysis-header" id="analysis-header"></div>
+        <div class="search-bar-row">
+          <input type="text" id="global-search" class="search-input" placeholder="Search all columns…" />
+          <span id="search-count" class="search-count"></span>
+          <div id="quick-filters" class="quick-filters"></div>
+        </div>
+        <div class="analysis-tabs">
+          <button class="tab-btn active" data-tab="overview">Overview</button>
+          <button class="tab-btn" data-tab="table">Table</button>
+          <button class="tab-btn" data-tab="charts">Charts</button>
+        </div>
+        <div class="tab-panel active" id="tab-overview"></div>
+        <div class="tab-panel" id="tab-table"></div>
+        <div class="tab-panel" id="tab-charts"></div>
+      </div>
+      <div id="main-loading" class="main-loading" style="display:none;">
+        <div class="spinner"></div>
+        <p id="loading-msg">Loading…</p>
+      </div>
+      <div id="main-error" class="main-error" style="display:none;"></div>
+    </main>
+  </div>
+
+  <script src="main.js"></script>
+  <script src="app.js"></script>
+  <script>
+    // Sidebar resize
+    (function() {
+      const resizer = document.getElementById('sidebar-resizer');
+      const sidebar = document.getElementById('sidebar');
+      let active = false, startX = 0, startW = 0;
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:9999;cursor:col-resize;display:none;';
+      document.body.appendChild(overlay);
+      resizer.addEventListener('mousedown', e => {
+        active = true; startX = e.clientX; startW = sidebar.getBoundingClientRect().width;
+        overlay.style.display = 'block'; e.preventDefault();
+      });
+      overlay.addEventListener('mousemove', e => {
+        if (!active) return;
+        sidebar.style.width = Math.min(600, Math.max(200, startW + e.clientX - startX)) + 'px';
+      });
+      overlay.addEventListener('mouseup', () => { active = false; overlay.style.display = 'none'; });
+      overlay.addEventListener('mouseleave', () => { active = false; overlay.style.display = 'none'; });
+    })();
+  </script>
+</body>
+</html>
