@@ -18,10 +18,28 @@ function parseCsvLine(line) {
 }
 
 function parseCsv(text) {
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length === 0) return { headers: [], rows: [] };
-  const headers = parseCsvLine(lines[0]).map(h => h.trim().replace(/^"|"$/g, ''));
-  const rows = lines.slice(1).map(line => {
+  // Split into records respecting quoted newlines
+  const records = [];
+  let cur = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') { cur += '"'; i++; }
+      else inQuotes = !inQuotes;
+      cur += ch;
+    } else if ((ch === '\n' || (ch === '\r' && text[i + 1] === '\n')) && !inQuotes) {
+      if (ch === '\r') i++;
+      if (cur.trim()) records.push(cur);
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur.trim()) records.push(cur);
+
+  if (records.length === 0) return { headers: [], rows: [] };
+  const headers = parseCsvLine(records[0]).map(h => h.trim().replace(/^"|"$/g, ''));
+  const rows = records.slice(1).map(line => {
     const values = parseCsvLine(line);
     return Object.fromEntries(headers.map((h, i) => [h, (values[i] ?? '').trim()]));
   }).filter(r => Object.values(r).some(v => v !== ''));
@@ -436,17 +454,32 @@ function showRowDetail(row) {
     panel.className = 'row-detail-panel';
     document.body.appendChild(panel);
   }
-  const fields = Object.entries(row).filter(([,v]) => v !== '');
-  panel.innerHTML = `
-    <div class="row-detail-title">
-      Row Detail
-      <button class="row-detail-close" onclick="document.getElementById('row-detail-panel').classList.remove('open')">✕</button>
-    </div>
-    ${fields.map(([k,v]) => `
-      <div class="row-detail-field">
-        <div class="row-detail-key">${escapeHtml(k)}</div>
-        <div class="row-detail-val ${k==='EXCEPTION_TYPE'||k==='ERROR_CODE'?'val-error':''}">${escapeHtml(v)}</div>
-      </div>`).join('')}`;
+  panel.textContent = '';
+
+  const title = document.createElement('div');
+  title.className = 'row-detail-title';
+  title.textContent = 'Row Detail';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'row-detail-close';
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', () => panel.classList.remove('open'));
+  title.appendChild(closeBtn);
+  panel.appendChild(title);
+
+  Object.entries(row).filter(([, v]) => v !== '').forEach(([k, v]) => {
+    const field = document.createElement('div');
+    field.className = 'row-detail-field';
+    const key = document.createElement('div');
+    key.className = 'row-detail-key';
+    key.textContent = k;
+    const val = document.createElement('div');
+    val.className = 'row-detail-val' + (k === 'EXCEPTION_TYPE' || k === 'ERROR_CODE' ? ' val-error' : '');
+    val.textContent = v;
+    field.appendChild(key);
+    field.appendChild(val);
+    panel.appendChild(field);
+  });
+
   panel.classList.add('open');
 }
 
