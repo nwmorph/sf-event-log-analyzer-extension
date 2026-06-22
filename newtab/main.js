@@ -349,8 +349,10 @@ function renderLoginOverview(rows, headers) {
 
 function renderApiUsageOverview(rows, headers) {
   const total = rows.length;
-  const types = topN(rows, 'API_TYPE');
-  const users = topN(rows, 'USER_ID_DERIVED');
+  const types = topN(rows, 'API_TYPE').map(([code, n]) => [API_TYPE_LABELS[code] || code, n]);
+  const userCounts = {};
+  rows.forEach(r => { const id = r.USER_ID_DERIVED || '(unknown)'; userCounts[id] = (userCounts[id] || 0) + 1; });
+  const users = Object.entries(userCounts).sort((a,b) => b[1]-a[1]).slice(0,8).map(([id,n]) => [formatUser(id), n]);
   return statCards([
     { label: 'Records', value: total.toLocaleString() },
     { label: 'API Types', value: new Set(rows.map(r => r.API_TYPE)).size },
@@ -487,6 +489,8 @@ function renderGenericOverview(rows, headers) {
     }
     let entries = topN(rows, col, 8);
     if (/USER_ID/i.test(col)) entries = entries.map(([id, count]) => [formatUser(id), count]);
+    if (col === 'API_TYPE')   entries = entries.map(([c, count]) => [API_TYPE_LABELS[c] || c, count]);
+    if (col === 'QUIDDITY')   entries = entries.map(([c, count]) => [QUIDDITY_LABELS[c] || c, count]);
     if (entries.length > 1) html += topNSection(colLabel(col), entries, rows.length);
   });
   // Always show user breakdown if a user column exists and wasn't already included
@@ -543,6 +547,22 @@ const COL_LABELS = {
   API_VERSION:           'API Version',
   EVENT_TYPE:            'Event Type',
   TIMESTAMP:             'Timestamp',
+  LOGIN_KEY:             'Login Key (session group)',
+  SESSION_KEY:           'Session Key (request group)',
+};
+
+const API_TYPE_LABELS = {
+  D: 'Apex (D)',
+  E: 'SOAP Enterprise (E)',
+  I: 'SOAP Partner (I)',
+  M: 'Metadata API (M)',
+  O: 'Old SOAP (O)',
+  P: 'REST API (P)',
+  S: 'ApexRest (S)',
+  T: 'Tooling REST (T)',
+  U: 'Tooling SOAP (U)',
+  X: 'Bulk API v1 (X)',
+  Z: 'Bulk API v2 (Z)',
 };
 
 function colLabel(h) {
@@ -662,17 +682,20 @@ function showRowDetail(row) {
     field.className = 'row-detail-field';
     const key = document.createElement('div');
     key.className = 'row-detail-key';
-    key.textContent = k;
+    key.textContent = colLabel(k);
     const val = document.createElement('div');
     val.className = 'row-detail-val' + (k === 'EXCEPTION_TYPE' || k === 'ERROR_CODE' ? ' val-error' : '');
     const isUserCol = (k === 'USER_ID_DERIVED' || k === 'USER_ID') && currentUserMap[v];
-    val.textContent = isUserCol ? currentUserMap[v] : v;
-    if (isUserCol) {
-      const idSpan = document.createElement('span');
-      idSpan.className = 'row-detail-subtext';
-      idSpan.textContent = v;
+    const apiTypeLabel   = k === 'API_TYPE'  && API_TYPE_LABELS[v]  ? API_TYPE_LABELS[v]  : null;
+    const quidLabel      = k === 'QUIDDITY'  && QUIDDITY_LABELS[v]  ? QUIDDITY_LABELS[v]  : null;
+    const displayVal = isUserCol ? currentUserMap[v] : (apiTypeLabel || quidLabel || v);
+    val.textContent = displayVal;
+    if (isUserCol || apiTypeLabel || quidLabel) {
+      const sub = document.createElement('span');
+      sub.className = 'row-detail-subtext';
+      sub.textContent = v;
       val.appendChild(document.createElement('br'));
-      val.appendChild(idSpan);
+      val.appendChild(sub);
     }
     field.appendChild(key);
     field.appendChild(val);
@@ -966,12 +989,14 @@ function renderBarChart(rows, col) {
   const isUserCol   = col === 'USER_ID_DERIVED' || col === 'USER_ID';
   const isQuidCol   = col === 'QUIDDITY';
   const isPrefixCol = col === 'KEY_PREFIX';
+  const isApiType   = col === 'API_TYPE';
   // entries: [ [displayLabel, count, rawValue], ... ]
   const entries = rawEntries.map(([raw, n]) => {
     let label = raw;
     if (isUserCol)   label = formatUser(raw);
-    if (isQuidCol)   label = QUIDDITY_LABELS[raw] ? QUIDDITY_LABELS[raw] + ' (' + raw + ')' : raw;
+    if (isQuidCol)   label = QUIDDITY_LABELS[raw] || raw;
     if (isPrefixCol) label = formatPrefix(raw) || raw;
+    if (isApiType)   label = API_TYPE_LABELS[raw] || raw;
     return [label, n, raw];
   });
 

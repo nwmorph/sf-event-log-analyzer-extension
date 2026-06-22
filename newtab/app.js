@@ -290,25 +290,19 @@ function selectFile(rowEl) {
         showMainError(response.error || 'Failed to download log file.');
         return;
       }
-      // Extract user IDs and key prefixes from CSV before rendering
-      const headerCols = response.text.split('\n')[0].split(',').map(h => h.trim().replace(/"/g,''));
-      const csvLines   = response.text.split(/\r?\n/).slice(1);
+      // Parse CSV properly (parseCsv is defined in main.js, loaded before app.js)
+      const parsed = parseCsv(response.text);
+      const headers = parsed.headers;
 
-      const userColIndices   = ['USER_ID_DERIVED', 'USER_ID'].map(n => headerCols.indexOf(n)).filter(i => i >= 0);
-      const prefixColIndices = ['KEY_PREFIX'].map(n => headerCols.indexOf(n)).filter(i => i >= 0);
+      const userCols   = ['USER_ID_DERIVED', 'USER_ID'].filter(n => headers.includes(n));
+      const prefixCols = ['KEY_PREFIX'].filter(n => headers.includes(n));
 
-      const ids = userColIndices.length > 0 ? [...new Set(
-        csvLines.flatMap(l => {
-          const parts = l.split(',');
-          return userColIndices.map(i => parts[i]?.trim().replace(/"/g,''));
-        }).filter(Boolean)
+      const ids = userCols.length > 0 ? [...new Set(
+        parsed.rows.flatMap(r => userCols.map(c => r[c])).filter(Boolean)
       )] : [];
 
-      const prefixes = prefixColIndices.length > 0 ? [...new Set(
-        csvLines.flatMap(l => {
-          const parts = l.split(',');
-          return prefixColIndices.map(i => parts[i]?.trim().replace(/"/g,''));
-        }).filter(Boolean)
+      const prefixes = prefixCols.length > 0 ? [...new Set(
+        parsed.rows.flatMap(r => prefixCols.map(c => r[c])).filter(Boolean)
       )] : [];
 
       Promise.all([
