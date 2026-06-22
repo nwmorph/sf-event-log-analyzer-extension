@@ -608,3 +608,40 @@ body {
   transition: background 0.1s;
 }
 .btn-small:hover { background: var(--hover); }
+
+/* ── Raw CSV tab ──────────────────────────────────────────────────────────── */
+.raw-log-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.raw-log-search {
+  flex: 1;
+  min-width: 200px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 0.84rem;
+  font-family: inherit;
+}
+.raw-log-search:focus { outline: none; border-color: var(--accent); }
+.raw-log-count { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
+.raw-log-pre {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-family: 'Menlo', 'Consolas', 'Monaco', monospace;
+  color: var(--fg);
+  white-space: pre;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: calc(100vh - 220px);
+  line-height: 1.5;
+}

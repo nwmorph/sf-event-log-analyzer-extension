@@ -50,6 +50,8 @@ function pct(v, total) { return total > 0 ? Math.round(v/total*100) : 0; }
 
 // ── State ─────────────────────────────────────────────────────────────────
 let currentCsvData = null;   // { headers, rows }
+let currentCsvText = '';     // raw CSV text for the Raw CSV tab
+let currentLoadId = 0;       // increments each time a new log is loaded
 let filteredRows = [];        // after search + quick filters
 let activeQuickFilters = new Set();
 let sortCol = null;
@@ -59,6 +61,8 @@ let currentEventType = '';
 // ── Entry point ────────────────────────────────────────────────────────────
 function analyseEventLog(csvText, eventType, meta) {
   currentEventType = eventType || '';
+  currentCsvText = csvText || '';
+  currentLoadId++;
   currentCsvData = parseCsv(csvText);
   filteredRows = [...currentCsvData.rows];
   activeQuickFilters.clear();
@@ -107,6 +111,7 @@ function analyseEventLog(csvText, eventType, meta) {
       renderOverview();
       renderTable();
       renderCharts();
+      renderRaw();
     };
   });
 
@@ -144,6 +149,7 @@ function applyFilters() {
   renderOverview();
   renderTable();
   renderCharts();
+  renderRaw();
 }
 
 // ── Quick filter definitions ───────────────────────────────────────────────
@@ -523,4 +529,50 @@ function renderBarChart(rows, col) {
   wrap.innerHTML = `<div class="chart-title">${escapeHtml(col)}</div>
     <svg class="chart-svg" width="${W}" height="${H + 10}" viewBox="0 0 ${W} ${H + 10}">${bars}</svg>`;
   return wrap;
+}
+
+// ── Raw CSV tab ────────────────────────────────────────────────────────────
+function renderRaw() {
+  const panel = document.getElementById('tab-raw');
+  if (!panel || !panel.classList.contains('active')) return;
+
+  const pre     = document.getElementById('raw-log-pre');
+  const search  = document.getElementById('raw-log-search');
+  const countEl = document.getElementById('raw-log-count');
+  const copyBtn = document.getElementById('raw-log-copy');
+  if (!pre) return;
+
+  // Only populate the pre once per log load
+  if (pre.dataset.loaded !== String(currentLoadId)) {
+    pre.textContent = currentCsvText;
+    pre.dataset.loaded = String(currentLoadId);
+    if (search) search.value = '';
+  }
+
+  const allLines = currentCsvText.split('\n');
+
+  function updateDisplay(q) {
+    const visible = q ? allLines.filter(l => l.toLowerCase().includes(q)) : allLines;
+    pre.textContent = visible.join('\n');
+    if (countEl) {
+      countEl.textContent = visible.length === allLines.length
+        ? allLines.length + ' lines'
+        : visible.length + ' / ' + allLines.length + ' lines';
+    }
+  }
+
+  updateDisplay('');
+
+  if (search) {
+    search.oninput = () => updateDisplay(search.value.trim().toLowerCase());
+  }
+
+  if (copyBtn) {
+    copyBtn.onclick = () => {
+      navigator.clipboard.writeText(currentCsvText).then(() => {
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = 'Copy all'; }, 1500);
+      }).catch(() => {});
+    };
+  }
 }

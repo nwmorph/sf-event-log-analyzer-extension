@@ -76,10 +76,19 @@
           <button class="tab-btn active" data-tab="overview">Overview</button>
           <button class="tab-btn" data-tab="table">Table</button>
           <button class="tab-btn" data-tab="charts">Charts</button>
+          <button class="tab-btn" data-tab="raw">Raw CSV</button>
         </div>
         <div class="tab-panel active" id="tab-overview"></div>
         <div class="tab-panel" id="tab-table"></div>
         <div class="tab-panel" id="tab-charts"></div>
+        <div class="tab-panel" id="tab-raw">
+          <div class="raw-log-toolbar">
+            <input type="text" class="raw-log-search" id="raw-log-search" placeholder="Filter lines…" />
+            <span class="raw-log-count" id="raw-log-count"></span>
+            <button class="btn-small" id="raw-log-copy">Copy all</button>
+          </div>
+          <pre class="raw-log-pre" id="raw-log-pre"></pre>
+        </div>
       </div>
       <div id="main-loading" class="main-loading" style="display:none;">
         <div class="spinner"></div>
