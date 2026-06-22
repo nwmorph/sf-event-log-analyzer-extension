@@ -449,7 +449,7 @@ function renderGenericOverview(rows, headers) {
     if (/USER_ID/i.test(col)) {
       entries = entries.map(([id, count]) => [formatUser(id), count]);
     }
-    if (entries.length > 1) html += topNSection(col, entries, rows.length);
+    if (entries.length > 1) html += topNSection(colLabel(col), entries, rows.length);
   });
   // Always show user breakdown if a user column exists and wasn't already included
   const userCol = ['USER_ID_DERIVED','USER_ID'].find(c => headers.includes(c) && !stringCols.includes(c));
@@ -461,6 +461,54 @@ function renderGenericOverview(rows, headers) {
     if (userEntries.length > 0) html += topNSection('Most Active Users', userEntries, rows.length, 'var(--amber)');
   }
   return html;
+}
+
+// ── Column label translations ──────────────────────────────────────────────
+const COL_LABELS = {
+  USER_ID_DERIVED:       'User Name',
+  USER_ID:               'User Name',
+  ORGANIZATION_ID:       'Org ID',
+  REQUEST_ID:            'Request ID',
+  SESSION_KEY:           'Session Key',
+  LOGIN_KEY:             'Login Key',
+  KEY_PREFIX:            'Object Type (Key Prefix)',
+  FIRST_ENTITY_ID:       'First Record ID',
+  ENTITY_NAME:           'Sobject / Class',
+  ENTITY_TYPE:           'Object Type',
+  CLIENT_IP:             'Client IP',
+  CPU_TIME:              'CPU Time (ms)',
+  RUN_TIME:              'Run Time (ms)',
+  EXEC_TIME:             'Exec Time (ms)',
+  DB_TOTAL_TIME:         'DB Time (ms)',
+  CALLOUT_TIME:          'Callout Time (ms)',
+  NUMBER_SOQL_QUERIES:   'SOQL Queries',
+  NUMBER_DML_STATEMENTS: 'DML Statements',
+  NUMBER_DML_ROWS:       'DML Rows',
+  EXCEPTION_TYPE:        'Exception Type',
+  EXCEPTION_MESSAGE:     'Exception Message',
+  EXCEPTION_CATEGORY:    'Exception Category',
+  DML_TYPE:              'DML Operation',
+  ROWS_PROCESSED:        'Rows Processed',
+  ENTRY_POINT:           'Entry Point',
+  QUIDDITY:              'Execution Type',
+  STATUS_CODE:           'HTTP Status',
+  METHOD:                'HTTP Method',
+  URI:                   'URI / Endpoint',
+  PAGE_APP_NAME:         'Page / App',
+  PAGE_CONTEXT:          'Page Context',
+  CONNECTED_APP_ID:      'Connected App ID',
+  LOGIN_STATUS:          'Login Status',
+  BROWSER_TYPE:          'Browser',
+  PLATFORM_TYPE:         'Platform',
+  IS_LONG_RUNNING_REQUEST: 'Long Running?',
+  API_TYPE:              'API Type',
+  API_VERSION:           'API Version',
+  EVENT_TYPE:            'Event Type',
+  TIMESTAMP:             'Timestamp',
+};
+
+function colLabel(h) {
+  return COL_LABELS[h] || h;
 }
 
 // ── Table renderer ─────────────────────────────────────────────────────────
@@ -489,7 +537,7 @@ function renderTable() {
   </div>`;
 
   const thead = `<thead><tr>${orderedHeaders.map(h =>
-    `<th data-col="${escapeHtml(h)}" class="${sortCol===h ? 'sort-'+sortDir : ''}">${escapeHtml(h)}</th>`
+    `<th data-col="${escapeHtml(h)}" class="${sortCol===h ? 'sort-'+sortDir : ''}" title="${escapeHtml(h)}">${escapeHtml(colLabel(h))}</th>`
   ).join('')}</tr></thead>`;
 
   const tbody = `<tbody>${rows.slice(0, 500).map((row, idx) => {
@@ -891,7 +939,7 @@ function renderBarChart(rows, col) {
 
   const title = document.createElement('div');
   title.className = 'chart-title';
-  title.textContent = BAR_CHART_TITLES[col] || col;
+  title.textContent = BAR_CHART_TITLES[col] || colLabel(col);
   wrap.appendChild(title);
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');

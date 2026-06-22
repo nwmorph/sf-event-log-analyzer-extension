@@ -52,8 +52,11 @@ function showOrgLabel(url, orgInfo) {
   try {
     const host = new URL(url).hostname;
     if (orgInfo && orgInfo.Name) {
-      el.textContent = orgInfo.Name + (orgInfo.IsSandbox ? ' (Sandbox)' : '');
-      el.title = orgInfo.Name + ' · ' + host + (orgInfo.InstanceName ? ' · ' + orgInfo.InstanceName : '');
+      const subdomain = host.split('.')[0].toUpperCase();
+      const instance  = orgInfo.InstanceName || '';
+      const parts = [orgInfo.Name, instance, subdomain].filter(Boolean);
+      el.textContent = parts.join(' · ') + (orgInfo.IsSandbox ? ' (Sandbox)' : '');
+      el.title = parts.join(' · ') + (orgInfo.IsSandbox ? ' · Sandbox' : '');
     } else {
       el.textContent = host.split('.')[0] || host;
       el.title = url;
