@@ -93,6 +93,20 @@ body {
   color: var(--fg);
 }
 
+.org-switcher {
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--fg);
+  font-size: 0.75rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.org-switcher:focus { outline: none; border-color: var(--accent); }
+
 .sidebar-org {
   font-size: 0.72rem;
   color: var(--muted);

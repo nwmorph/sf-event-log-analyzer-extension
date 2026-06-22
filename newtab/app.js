@@ -9,6 +9,7 @@ let keyPrefixMap = {};  // { 'abc': { label: 'Account', api: 'Account' } }
 document.addEventListener('DOMContentLoaded', async () => {
   setDefaultDateRange();
   await loadOrgUrl();
+  await populateOrgSwitcher();
   setupFilterListeners();
 });
 
@@ -76,7 +77,56 @@ function fetchAndShowOrgInfo() {
   });
 }
 
-// ── Filter wiring ──────────────────────────────────────────────────────────
+// ── Org switcher ───────────────────────────────────────────────────────────
+async function populateOrgSwitcher() {
+  const SF_PATTERN = /^https:\/\/[^/]+\.(salesforce\.com|force\.com|lightning\.force\.com|my\.salesforce\.com)/;
+  const tabs = await chrome.tabs.query({});
+  const sfTabs = tabs.filter(t => t.url && SF_PATTERN.test(t.url));
+
+  // Deduplicate by origin
+  const seen = new Set();
+  const orgs = [];
+  sfTabs.forEach(t => {
+    try {
+      const origin = new URL(t.url).origin;
+      if (!seen.has(origin)) { seen.add(origin); orgs.push(origin); }
+    } catch { /* skip */ }
+  });
+
+  const select = document.getElementById('org-switcher');
+  if (!select) return;
+
+  if (orgs.length < 2) {
+    select.style.display = 'none';
+    return;
+  }
+
+  select.textContent = '';
+  orgs.forEach(origin => {
+    const opt = document.createElement('option');
+    opt.value = origin;
+    opt.textContent = origin.replace('https://', '').split('.')[0];
+    if (origin === orgUrl) opt.selected = true;
+    select.appendChild(opt);
+  });
+  select.style.display = '';
+
+  select.addEventListener('change', async () => {
+    orgUrl = select.value;
+    await chrome.storage.session.set({ orgUrl });
+    // Reset state for the new org
+    allFiles = [];
+    userNames = {};
+    keyPrefixMap = {};
+    selectedFileId = null;
+    showOrgLabel(orgUrl, null);
+    fetchAndShowOrgInfo();
+    renderFileList();
+    showMainEmpty();
+  });
+}
+
+// ── Filter wiring ───────────────────────────────────────────────────────────
 function setupFilterListeners() {
   document.getElementById('btn-refresh').addEventListener('click', doRefresh);
   document.getElementById('filter-type').addEventListener('change', renderFileList);
