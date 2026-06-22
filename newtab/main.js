@@ -492,10 +492,10 @@ function renderTable() {
     `<th data-col="${escapeHtml(h)}" class="${sortCol===h ? 'sort-'+sortDir : ''}">${escapeHtml(h)}</th>`
   ).join('')}</tr></thead>`;
 
-  const tbody = `<tbody>${rows.slice(0, 500).map(row => {
-    const isError = parseInt(row.STATUS_CODE || 0) >= 400 || (row.LOGIN_STATUS && row.LOGIN_STATUS !== 'LOGIN_NO_ERROR' && row.LOGIN_STATUS !== 'Success');
-    const isWarn  = parseInt(row.RUN_TIME || 0) > 1000;
-    return `<tr class="${isError?'row-error':isWarn?'row-warn':''}" data-row='${escapeHtml(JSON.stringify(row))}'>
+  const tbody = `<tbody>${rows.slice(0, 500).map((row, idx) => {
+    const isError = parseInt(row.STATUS_CODE || 0) >= 400 || !!row.EXCEPTION_TYPE || (row.LOGIN_STATUS && row.LOGIN_STATUS !== 'LOGIN_NO_ERROR' && row.LOGIN_STATUS !== 'Success');
+    const isWarn  = parseInt(row.RUN_TIME || row.EXEC_TIME || 0) > 1000;
+    return `<tr class="${isError?'row-error':isWarn?'row-warn':''}" data-idx="${idx}">
       ${orderedHeaders.map(h => {
         const v = row[h] ?? '';
         let cls = '';
@@ -503,7 +503,7 @@ function renderTable() {
         else if (h === 'STATUS_CODE' && parseInt(v) >= 200 && parseInt(v) < 300) cls = 'td-ok';
         else if (h === 'EXCEPTION_TYPE' && v) cls = 'td-error';
         else if (h === 'LOGIN_STATUS' && v && v !== 'LOGIN_NO_ERROR' && v !== 'Success') cls = 'td-error';
-        else if ((h === 'RUN_TIME' || h === 'CPU_TIME') && parseInt(v) > 1000) cls = 'td-warn';
+        else if ((h === 'RUN_TIME' || h === 'CPU_TIME' || h === 'EXEC_TIME') && parseInt(v) > 1000) cls = 'td-warn';
         const isUserCol = (h === 'USER_ID_DERIVED' || h === 'USER_ID') && v;
         const display = isUserCol ? (currentUserMap[v] || v) : v;
         const tooltip = isUserCol && currentUserMap[v] ? v : display;
@@ -530,9 +530,12 @@ function renderTable() {
     });
   });
 
-  // Row click → detail panel
-  panel.querySelectorAll('.data-table tr[data-row]').forEach(tr => {
-    tr.addEventListener('click', () => showRowDetail(JSON.parse(tr.getAttribute('data-row'))));
+  // Row click → detail panel (use index to avoid JSON-in-attribute quoting issues)
+  panel.querySelectorAll('.data-table tr[data-idx]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const idx = parseInt(tr.getAttribute('data-idx'));
+      if (!isNaN(idx) && rows[idx]) showRowDetail(rows[idx]);
+    });
   });
 
   // Copy CSV
@@ -622,19 +625,45 @@ function formatBucketLabel(key) {
   } catch { return key; }
 }
 
+function tsToMs(ts) {
+  if (!ts) return null;
+  try {
+    if (ts.includes('-')) return new Date(ts).getTime();
+    // "20260621182631.686" → "2026-06-21T18:26:31.686Z"
+    const s = ts.replace('.', '').padEnd(17, '0');
+    const iso = s.substring(0,4)+'-'+s.substring(4,6)+'-'+s.substring(6,8)+'T'
+               +s.substring(8,10)+':'+s.substring(10,12)+':'+s.substring(12,14)+'.'+s.substring(14,17)+'Z';
+    return new Date(iso).getTime();
+  } catch { return null; }
+}
+
+function bucketKey(ms, bucketMs) {
+  return Math.floor(ms / bucketMs) * bucketMs;
+}
+
 function renderTimelineChart(rows) {
   const wrap = document.createElement('div');
   wrap.className = 'chart-container';
 
-  // Bucket by hour — detect format from first non-empty timestamp
+  // Parse all timestamps to ms
+  const times = rows.map(r => tsToMs(r.TIMESTAMP)).filter(Boolean);
+  if (times.length === 0) {
+    const t = document.createElement('div'); t.className = 'chart-title'; t.textContent = 'Events over Time';
+    const msg = document.createElement('p'); msg.style.cssText = 'color:var(--muted);font-size:0.8rem'; msg.textContent = 'No timestamp data.';
+    wrap.appendChild(t); wrap.appendChild(msg); return wrap;
+  }
+
+  const minMs = Math.min(...times), maxMs = Math.max(...times);
+  const spanMs = maxMs - minMs || 1;
+
+  // Pick bucket size to get 10–60 bars
+  const targets = [60000, 5*60000, 15*60000, 30*60000, 3600000, 6*3600000, 24*3600000];
+  const bucketMs = targets.find(b => Math.ceil(spanMs / b) <= 60) || 3600000;
+  const bucketLabel = bucketMs < 60000 ? 'sec' : bucketMs < 3600000 ? 'min' : bucketMs < 86400000 ? 'hr' : 'day';
+
   const buckets = {};
-  rows.forEach(r => {
-    const ts = r.TIMESTAMP || '';
-    // Salesforce timestamps: "20260620092205.750" or "2026-06-20T09:22:05.000+0000"
-    const hour = ts.includes('-') ? ts.substring(0, 13) : ts.substring(0, 10);
-    if (hour && hour.length >= 8) buckets[hour] = (buckets[hour] || 0) + 1;
-  });
-  const sorted = Object.entries(buckets).sort((a,b) => a[0].localeCompare(b[0]));
+  times.forEach(ms => { const k = bucketKey(ms, bucketMs); buckets[k] = (buckets[k] || 0) + 1; });
+  const sorted = Object.entries(buckets).sort((a,b) => Number(a[0])-Number(b[0]));
   if (sorted.length < 2) {
     const msg = document.createElement('p');
     msg.style.cssText = 'color:var(--muted);font-size:0.8rem;margin:8px 0';
@@ -648,35 +677,30 @@ function renderTimelineChart(rows) {
   }
 
   const max = Math.max(...sorted.map(e=>e[1]));
-  const W = 620, H = 140, PAD_L = 36, PAD_B = 24;
-  const chartW = W - PAD_L;
+  const W = 680, H = 160, PAD_L = 36, PAD_B = 28;
+  const chartW = W - PAD_L - 4;
   const chartH = H - PAD_B;
   const bw = Math.max(2, chartW / sorted.length - 1);
 
-  // Y-axis gridlines
-  const gridLines = [0.25, 0.5, 0.75, 1].map(frac => {
-    const y = PAD_B + chartH * (1 - frac) - PAD_B;
-    const val = Math.round(max * frac);
-    return `<line x1="${PAD_L}" y1="${y}" x2="${W}" y2="${y}" stroke="var(--border)" stroke-width="0.5" opacity="0.5"/>
-            <text x="${PAD_L - 4}" y="${y + 4}" text-anchor="end" class="chart-axis-label">${val}</text>`;
-  }).join('');
+  // Format a bucket start ms as a readable axis label
+  function fmtMs(ms) {
+    const d = new Date(ms);
+    if (bucketMs < 3600000)
+      return d.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
+    if (bucketMs < 86400000)
+      return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', hour12: false });
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
 
-  const bars = sorted.map(([key, count], i) => {
-    const x = PAD_L + i * (chartW / sorted.length);
-    const bh = Math.max(1, (count / max) * chartH);
-    const y = chartH - bh;
-    const label = formatBucketLabel(key);
-    return `<rect class="chart-bar" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--accent)" rx="1">
-      <title>${label}: ${count} event${count !== 1 ? 's' : ''}</title>
-    </rect>`;
-  }).join('');
-
-  const firstLabel = formatBucketLabel(sorted[0][0]);
-  const lastLabel  = formatBucketLabel(sorted[sorted.length-1][0]);
+  // Full tooltip label
+  function fmtMsFull(ms) {
+    const d = new Date(ms);
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  }
 
   const title = document.createElement('div');
   title.className = 'chart-title';
-  title.textContent = 'Events over Time';
+  title.textContent = 'Events over Time (per ' + bucketLabel + ')';
   wrap.appendChild(title);
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -684,9 +708,50 @@ function renderTimelineChart(rows) {
   svg.setAttribute('width', W);
   svg.setAttribute('height', H);
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.innerHTML = gridLines + bars
-    + `<text x="${PAD_L}" y="${H}" class="chart-axis-label">${escapeHtml(firstLabel)}</text>`
-    + `<text x="${W}" y="${H}" text-anchor="end" class="chart-axis-label">${escapeHtml(lastLabel)}</text>`;
+
+  // Y-axis gridlines
+  [0.25, 0.5, 0.75, 1].forEach(frac => {
+    const y  = Math.round(chartH * (1 - frac));
+    const val = Math.round(max * frac);
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', PAD_L); line.setAttribute('y1', y);
+    line.setAttribute('x2', W);     line.setAttribute('y2', y);
+    line.setAttribute('stroke', 'var(--border)'); line.setAttribute('stroke-width', '0.5'); line.setAttribute('opacity', '0.5');
+    const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    txt.setAttribute('x', PAD_L - 4); txt.setAttribute('y', y + 4);
+    txt.setAttribute('text-anchor', 'end'); txt.setAttribute('class', 'chart-axis-label');
+    txt.textContent = val;
+    svg.appendChild(line); svg.appendChild(txt);
+  });
+
+  // Bars
+  sorted.forEach(([key, count], i) => {
+    const x  = PAD_L + i * (chartW / sorted.length);
+    const bh = Math.max(1, (count / max) * chartH);
+    const y  = chartH - bh;
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('class', 'chart-bar');
+    rect.setAttribute('x', x.toFixed(1)); rect.setAttribute('y', y.toFixed(1));
+    rect.setAttribute('width', bw.toFixed(1)); rect.setAttribute('height', bh.toFixed(1));
+    rect.setAttribute('fill', 'var(--accent)'); rect.setAttribute('rx', '1');
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    t.textContent = fmtMsFull(Number(key)) + ': ' + count + ' event' + (count !== 1 ? 's' : '');
+    rect.appendChild(t);
+    svg.appendChild(rect);
+  });
+
+  // X-axis: show ~5 evenly spaced labels
+  const step = Math.max(1, Math.floor(sorted.length / 5));
+  sorted.forEach(([key], i) => {
+    if (i % step !== 0 && i !== sorted.length - 1) return;
+    const x = PAD_L + i * (chartW / sorted.length) + bw / 2;
+    const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    txt.setAttribute('x', x.toFixed(1)); txt.setAttribute('y', H - 4);
+    txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('class', 'chart-axis-label');
+    txt.textContent = fmtMs(Number(key));
+    svg.appendChild(txt);
+  });
+
   wrap.appendChild(svg);
   return wrap;
 }

@@ -267,12 +267,18 @@ function selectFile(rowEl) {
         showMainError(response.error || 'Failed to download log file.');
         return;
       }
-      // Extract user IDs from CSV before rendering so overviews show names
-      const userIdCol = response.text.split('\n')[0].split(',').find(h => h.trim().replace(/"/g,'') === 'USER_ID_DERIVED');
-      if (userIdCol) {
-        const parsed = response.text.split(/\r?\n/).slice(1);
-        const colIdx = response.text.split('\n')[0].split(',').map(h => h.trim().replace(/"/g,'')).indexOf('USER_ID_DERIVED');
-        const ids = [...new Set(parsed.map(l => l.split(',')[colIdx]?.trim().replace(/"/g,'')).filter(Boolean))];
+      // Extract user IDs from CSV header before rendering so overviews show names
+      const headerCols = response.text.split('\n')[0].split(',').map(h => h.trim().replace(/"/g,''));
+      const userColIndices = ['USER_ID_DERIVED', 'USER_ID']
+        .map(name => headerCols.indexOf(name)).filter(i => i >= 0);
+      if (userColIndices.length > 0) {
+        const csvLines = response.text.split(/\r?\n/).slice(1);
+        const ids = [...new Set(
+          csvLines.flatMap(l => {
+            const parts = l.split(',');
+            return userColIndices.map(i => parts[i]?.trim().replace(/"/g,''));
+          }).filter(Boolean)
+        )];
         fetchUserNamesForIds(ids).then(() => analyseEventLog(response.text, type, { date, interval, size }, userNames));
       } else {
         analyseEventLog(response.text, type, { date, interval, size }, userNames);
