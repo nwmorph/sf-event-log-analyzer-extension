@@ -288,24 +288,117 @@ function topNPrefixSection(title, rawEntries, total, color = 'var(--accent)') {
   </div>`;
 }
 
-function renderApexExceptionOverview(rows, headers) {
-  const total = rows.length;
-  const types = topN(rows, 'EXCEPTION_TYPE');
-  const classes = topN(rows, 'ENTITY_NAME');
-  const userCounts = {};
-  rows.forEach(r => { const id = r.USER_ID_DERIVED || '(unknown)'; userCounts[id] = (userCounts[id] || 0) + 1; });
-  const users = Object.entries(userCounts).sort((a,b) => b[1]-a[1]).slice(0, 5)
-    .map(([id, count]) => [formatUser(id), count]);
+function truncateMsg(msg, len = 120) {
+  if (!msg) return '';
+  const clean = msg.replace(/^"+|"+$/g, '').trim();
+  return clean.length > len ? clean.substring(0, len) + '…' : clean;
+}
 
-  return statCards([
-    { label: 'Total Exceptions', value: total.toLocaleString(), cls: total > 0 ? 'red' : 'green' },
-    { label: 'Unique Types', value: new Set(rows.map(r => r.EXCEPTION_TYPE)).size },
-    { label: 'Affected Classes', value: new Set(rows.map(r => r.ENTITY_NAME)).size },
-    { label: 'Affected Users', value: new Set(rows.map(r => r.USER_ID_DERIVED)).size },
-  ])
-  + topNSection('Exception Types', types, total, 'var(--red)')
-  + topNSection('Affected Classes / Triggers', classes, total)
-  + (users.length > 1 ? topNSection('Top Users', users, total, 'var(--amber)') : '');
+function renderApexExceptionOverview(rows, headers) {
+  const total    = rows.length;
+  const uniqueTypes    = new Set(rows.map(r => r.EXCEPTION_TYPE).filter(Boolean));
+  const classCol = headers.includes('APEX_ENTITY_NAME') ? 'APEX_ENTITY_NAME' : 'ENTITY_NAME';
+  const uniqueClasses  = new Set(rows.map(r => r[classCol]).filter(Boolean));
+  const uniqueMessages = new Set(rows.map(r => r.EXCEPTION_MESSAGE).filter(Boolean));
+  const uniqueUsers    = new Set(rows.map(r => r.USER_ID_DERIVED).filter(Boolean));
+  const inactive = rows.filter(r => r.EXCEPTION_TYPE === 'InactiveUserException').length;
+
+  // ── Stat cards ─────────────────────────────────────────────────────────────
+  let html = statCards([
+    { label: 'Total Exceptions',  value: total.toLocaleString(),         cls: total > 0 ? 'red' : 'green' },
+    { label: 'Unique Types',      value: uniqueTypes.size },
+    { label: 'Affected Classes',  value: uniqueClasses.size, cls: uniqueClasses.size === 0 ? 'amber' : '' },
+    { label: 'Affected Users',    value: uniqueUsers.size,               cls: uniqueUsers.size > 5 ? 'amber' : '' },
+  ]);
+
+  // ── Summary narrative ──────────────────────────────────────────────────────
+  const summaryLines = [];
+  summaryLines.push(total.toLocaleString() + ' unexpected exception' + (total !== 1 ? 's' : '') + ' recorded.');
+  if (uniqueTypes.size === 1) {
+    summaryLines.push('All exceptions are of type ' + [...uniqueTypes][0] + '.');
+  } else {
+    summaryLines.push(uniqueTypes.size + ' distinct exception types found.');
+  }
+  if (uniqueClasses.size === 0) {
+    summaryLines.push('No Apex class or trigger was identified — exceptions may originate from a platform process.');
+  } else if (uniqueClasses.size === 1) {
+    summaryLines.push('All exceptions originate from a single class or trigger: ' + [...uniqueClasses][0] + '.');
+  } else {
+    summaryLines.push(uniqueClasses.size + ' different classes or triggers are affected.');
+  }
+  if (uniqueMessages.size === 1) {
+    summaryLines.push('All share the same message: "' + truncateMsg([...uniqueMessages][0], 100) + '".');
+  } else {
+    summaryLines.push(uniqueMessages.size + ' distinct exception messages.');
+  }
+  if (inactive > 0) summaryLines.push(inactive + ' InactiveUserException' + (inactive !== 1 ? 's' : '') + ' — likely deactivated user accounts triggering processes.');
+
+  html += `<div class="overview-section overview-summary">
+    <div class="overview-section-title">Summary</div>
+    ${summaryLines.map(l => `<p class="summary-line">${escapeHtml(l)}</p>`).join('')}
+  </div>`;
+
+  // ── Exception types breakdown ──────────────────────────────────────────────
+  html += topNSection('Exception Types', topN(rows, 'EXCEPTION_TYPE'), total, 'var(--red)');
+
+  // ── Distinct messages ──────────────────────────────────────────────────────
+  if (headers.includes('EXCEPTION_MESSAGE')) {
+    const msgCounts = {};
+    rows.forEach(r => {
+      const m = truncateMsg(r.EXCEPTION_MESSAGE, 100);
+      if (m) msgCounts[m] = (msgCounts[m] || 0) + 1;
+    });
+    const msgEntries = Object.entries(msgCounts).sort((a,b) => b[1]-a[1]).slice(0, 8);
+    if (msgEntries.length > 0) html += topNSection('Exception Messages', msgEntries, total, 'var(--red)');
+  }
+
+  // ── Affected classes / triggers ────────────────────────────────────────────
+  if (headers.includes(classCol)) {
+    const classEntries = topN(rows, classCol, 10);
+    if (classEntries.length > 0 && classEntries[0][0] !== '(blank)') {
+      html += topNSection('Affected Classes / Triggers', classEntries, total);
+    } else {
+      html += `<div class="overview-section">
+        <div class="overview-section-title">Affected Classes / Triggers</div>
+        <p class="summary-line" style="color:var(--muted)">No class name recorded — exception may come from an anonymous block, platform process, or flow.</p>
+      </div>`;
+    }
+  }
+
+  // ── Apex entry points (if present) ────────────────────────────────────────
+  const entryCol = ['APEX_NAME','APEX_ENTRY_POINT'].find(c => headers.includes(c));
+  if (entryCol) {
+    const entries = topN(rows, entryCol, 8).filter(([l]) => l !== '(blank)');
+    if (entries.length > 0) html += topNSection('Apex Entry Points', entries, total);
+  }
+
+  // ── Exception categories (if present) ─────────────────────────────────────
+  if (headers.includes('EXCEPTION_CATEGORY')) {
+    const cats = topN(rows, 'EXCEPTION_CATEGORY', 8).filter(([l]) => l !== '(blank)');
+    if (cats.length > 0) html += topNSection('Exception Categories', cats, total, 'var(--amber)');
+  }
+
+  // ── Stack trace patterns (if present) ─────────────────────────────────────
+  if (headers.includes('STACK_TRACE')) {
+    const frameCounts = {};
+    rows.forEach(r => {
+      const st = r.STACK_TRACE || '';
+      // Extract first meaningful stack frame (first line containing a class name)
+      const firstFrame = st.split(/\n/).map(l => l.trim()).find(l => l.startsWith('Class.') || l.startsWith('Trigger.') || l.startsWith('AnonymousBlock'));
+      if (firstFrame) frameCounts[firstFrame] = (frameCounts[firstFrame] || 0) + 1;
+    });
+    const frameEntries = Object.entries(frameCounts).sort((a,b) => b[1]-a[1]).slice(0, 8);
+    if (frameEntries.length > 0) html += topNSection('Top Stack Frames (throw site)', frameEntries, total, 'var(--red)');
+  }
+
+  // ── Most affected users ────────────────────────────────────────────────────
+  const userCounts2 = {};
+  rows.forEach(r => { const id = r.USER_ID_DERIVED || '(unknown)'; userCounts2[id] = (userCounts2[id] || 0) + 1; });
+  const users = Object.entries(userCounts2).sort((a,b) => b[1]-a[1]).slice(0, 8)
+    .map(([id, count]) => [formatUser(id), count]);
+  if (users.length > 0) html += topNSection('Most Affected Users', users, total, 'var(--amber)');
+
+  return html;
 }
 
 function renderApiOverview(rows, headers, type) {
@@ -516,6 +609,8 @@ const COL_LABELS = {
   KEY_PREFIX:            'Object Type (Key Prefix)',
   FIRST_ENTITY_ID:       'First Record ID',
   ENTITY_NAME:           'Sobject / Class',
+  APEX_ENTITY_NAME:      'Apex Class / Trigger',
+  STACK_TRACE:           'Stack Trace',
   ENTITY_TYPE:           'Object Type',
   CLIENT_IP:             'Client IP',
   CPU_TIME:              'CPU Time (ms)',
@@ -579,7 +674,7 @@ function renderTable() {
 
   // Priority columns first for known types
   const PRIORITY = {
-    APEXUNEXPECTEDEXCEPTION: ['TIMESTAMP','EXCEPTION_TYPE','EXCEPTION_MESSAGE','ENTITY_NAME','USER_ID_DERIVED','RUN_TIME','CPU_TIME'],
+    APEXUNEXPECTEDEXCEPTION: ['TIMESTAMP','EXCEPTION_TYPE','EXCEPTION_MESSAGE','APEX_ENTITY_NAME','ENTITY_NAME','EXCEPTION_CATEGORY','STACK_TRACE','USER_ID_DERIVED'],
     RESTAPI: ['TIMESTAMP','METHOD','URI','STATUS_CODE','RUN_TIME','CPU_TIME','CLIENT_IP','USER_ID_DERIVED','ERROR_CODE'],
     AURAREQUEST: ['TIMESTAMP','PAGE_APP_NAME','PAGE_CONTEXT','CONNECTED_APP_ID','STATUS_CODE','RUN_TIME','CPU_TIME','USER_ID_DERIVED'],
     LOGIN: ['TIMESTAMP','USER_ID_DERIVED','LOGIN_STATUS','CLIENT_IP','BROWSER_TYPE','PLATFORM_TYPE','APPLICATION'],
@@ -810,8 +905,8 @@ function renderCharts() {
 
   // Bar charts for key categorical columns — use only one user column (prefer USER_ID_DERIVED)
   const userCol = ['USER_ID_DERIVED', 'USER_ID'].find(c => headers.includes(c));
-  const catCols = ['STATUS_CODE','METHOD','EXCEPTION_TYPE','LOGIN_STATUS','API_TYPE','ENTITY_TYPE',
-                   'QUIDDITY','ENTRY_POINT', ...(userCol ? [userCol] : [])].filter(c => headers.includes(c));
+  const catCols = ['STATUS_CODE','METHOD','EXCEPTION_TYPE','EXCEPTION_CATEGORY','LOGIN_STATUS','API_TYPE','ENTITY_TYPE',
+                   'QUIDDITY','ENTRY_POINT','APEX_ENTITY_NAME', ...(userCol ? [userCol] : [])].filter(c => headers.includes(c));
   catCols.forEach(col => panel.appendChild(renderBarChart(rows, col)));
 }
 
