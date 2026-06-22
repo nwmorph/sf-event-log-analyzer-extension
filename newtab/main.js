@@ -261,6 +261,33 @@ function topNSection(title, entries, total, color = 'var(--accent)') {
   </div>`;
 }
 
+function topNPrefixSection(title, rawEntries, total, color = 'var(--accent)') {
+  if (!rawEntries.length) return '';
+  const max = rawEntries[0][1];
+  return `<div class="overview-section">
+    <div class="overview-section-title">${escapeHtml(title)}</div>
+    ${rawEntries.map(([prefix, count]) => {
+      const info = currentPrefixMap[prefix];
+      const label     = info ? info.label : '—';
+      const api       = info ? info.api   : '';
+      const tooltip   = info ? prefix + ' · ' + info.label + ' (' + info.api + ')' : prefix;
+      return `<div class="top-n-row prefix-row">
+        <div class="prefix-row-left" title="${escapeHtml(tooltip)}">
+          <span class="prefix-badge">${escapeHtml(prefix)}</span>
+          <div class="prefix-names">
+            <div class="prefix-label">${escapeHtml(label)}</div>
+            ${api && api !== label ? `<div class="prefix-api">${escapeHtml(api)}</div>` : ''}
+          </div>
+        </div>
+        <div class="top-n-bar-wrap">
+          <div class="top-n-bar-track"><div class="top-n-bar-fill" style="width:${pct(count,max)}%;background:${color};"></div></div>
+          <div class="top-n-count">${count.toLocaleString()}</div>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
 function renderApexExceptionOverview(rows, headers) {
   const total = rows.length;
   const types = topN(rows, 'EXCEPTION_TYPE');
@@ -453,9 +480,13 @@ function renderGenericOverview(rows, headers) {
     { label: 'Columns', value: headers.length },
   ]);
   stringCols.forEach(col => {
+    if (col === 'KEY_PREFIX') {
+      const rawEntries = topN(rows, col, 8);
+      if (rawEntries.length > 1) html += topNPrefixSection(colLabel(col), rawEntries, rows.length);
+      return;
+    }
     let entries = topN(rows, col, 8);
     if (/USER_ID/i.test(col)) entries = entries.map(([id, count]) => [formatUser(id), count]);
-    if (col === 'KEY_PREFIX')  entries = entries.map(([p, count]) => [formatPrefix(p) || p, count]);
     if (entries.length > 1) html += topNSection(colLabel(col), entries, rows.length);
   });
   // Always show user breakdown if a user column exists and wasn't already included

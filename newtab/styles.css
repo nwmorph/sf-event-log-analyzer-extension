@@ -453,6 +453,42 @@ body {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.prefix-row { grid-template-columns: 1fr 80px; }
+.prefix-row-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.prefix-badge {
+  font-family: 'Menlo', 'Consolas', monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 5px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.prefix-names { min-width: 0; }
+.prefix-label {
+  font-size: 0.82rem;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.prefix-api {
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-family: 'Menlo', 'Consolas', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
 
 /* ── SVG Charts ───────────────────────────────────────────────────────────── */
 .chart-container {
