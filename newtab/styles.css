@@ -637,6 +637,8 @@ body {
 .error-meta { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
 
 /* ── Raw CSV tab ──────────────────────────────────────────────────────────── */
+.row-detail-subtext { font-size: 0.72rem; color: var(--muted); font-family: 'Menlo', 'Consolas', monospace; }
+
 .raw-log-toolbar {
   display: flex;
   align-items: center;

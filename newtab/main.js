@@ -504,7 +504,10 @@ function renderTable() {
         else if (h === 'EXCEPTION_TYPE' && v) cls = 'td-error';
         else if (h === 'LOGIN_STATUS' && v && v !== 'LOGIN_NO_ERROR' && v !== 'Success') cls = 'td-error';
         else if ((h === 'RUN_TIME' || h === 'CPU_TIME') && parseInt(v) > 1000) cls = 'td-warn';
-        return `<td class="${cls}" title="${escapeHtml(v)}">${escapeHtml(v.substring(0,80))}${v.length>80?'…':''}</td>`;
+        const isUserCol = (h === 'USER_ID_DERIVED' || h === 'USER_ID') && v;
+        const display = isUserCol ? (currentUserMap[v] || v) : v;
+        const tooltip = isUserCol && currentUserMap[v] ? v : display;
+        return `<td class="${cls}" title="${escapeHtml(tooltip)}">${escapeHtml(display.substring(0,80))}${display.length>80?'…':''}</td>`;
       }).join('')}
     </tr>`;
   }).join('')}${rows.length>500?`<tr><td colspan="${orderedHeaders.length}" style="text-align:center;color:var(--muted);padding:12px">Showing first 500 of ${rows.length.toLocaleString()} rows — use search to narrow results</td></tr>`:''}</tbody>`;
@@ -570,7 +573,15 @@ function showRowDetail(row) {
     key.textContent = k;
     const val = document.createElement('div');
     val.className = 'row-detail-val' + (k === 'EXCEPTION_TYPE' || k === 'ERROR_CODE' ? ' val-error' : '');
-    val.textContent = v;
+    const isUserCol = (k === 'USER_ID_DERIVED' || k === 'USER_ID') && currentUserMap[v];
+    val.textContent = isUserCol ? currentUserMap[v] : v;
+    if (isUserCol) {
+      const idSpan = document.createElement('span');
+      idSpan.className = 'row-detail-subtext';
+      idSpan.textContent = v;
+      val.appendChild(document.createElement('br'));
+      val.appendChild(idSpan);
+    }
     field.appendChild(key);
     field.appendChild(val);
     panel.appendChild(field);
