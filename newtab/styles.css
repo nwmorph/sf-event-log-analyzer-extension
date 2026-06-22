@@ -638,6 +638,18 @@ body {
 
 /* ── Raw CSV tab ──────────────────────────────────────────────────────────── */
 .row-detail-subtext { font-size: 0.72rem; color: var(--muted); font-family: 'Menlo', 'Consolas', monospace; }
+.clickable-bar { cursor: pointer; }
+.clickable-bar:hover { opacity: 0.8; }
+.chart-detail-row {
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin-bottom: 4px;
+  background: var(--surface2);
+  transition: background 0.08s;
+}
+.chart-detail-row:hover { background: var(--hover); }
+.chart-detail-row-ts { font-size: 0.7rem; color: var(--muted); margin-bottom: 2px; font-family: monospace; }
+.chart-detail-row-body { font-size: 0.8rem; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .raw-log-toolbar {
   display: flex;

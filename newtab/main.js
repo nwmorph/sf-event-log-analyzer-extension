@@ -593,6 +593,95 @@ function showRowDetail(row) {
   panel.classList.add('open');
 }
 
+// ── Chart detail panel ─────────────────────────────────────────────────────
+function showChartDetail(title, matchingRows) {
+  let panel = document.getElementById('row-detail-panel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'row-detail-panel';
+    panel.className = 'row-detail-panel';
+    document.body.appendChild(panel);
+  }
+  panel.textContent = '';
+
+  const hdr = document.createElement('div');
+  hdr.className = 'row-detail-title';
+  const titleSpan = document.createElement('span');
+  titleSpan.textContent = title;
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'row-detail-close';
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', () => panel.classList.remove('open'));
+  hdr.appendChild(titleSpan);
+  hdr.appendChild(closeBtn);
+  panel.appendChild(hdr);
+
+  // Summary stats for this slice
+  const count = matchingRows.length;
+  const avgRt  = count ? Math.round(matchingRows.reduce((s, r) => s + parseInt(r.RUN_TIME || r.EXEC_TIME || 0), 0) / count) : 0;
+  const avgCpu = count ? Math.round(matchingRows.reduce((s, r) => s + parseInt(r.CPU_TIME || 0), 0) / count) : 0;
+  const errors = matchingRows.filter(r => parseInt(r.STATUS_CODE || 0) >= 400 || !!r.EXCEPTION_TYPE).length;
+
+  function addStat(label, value, warn) {
+    const f = document.createElement('div');
+    f.className = 'row-detail-field';
+    const k = document.createElement('div');
+    k.className = 'row-detail-key';
+    k.textContent = label;
+    const v = document.createElement('div');
+    v.className = 'row-detail-val' + (warn ? ' val-error' : '');
+    v.textContent = value;
+    f.appendChild(k); f.appendChild(v);
+    panel.appendChild(f);
+  }
+
+  addStat('Events', String(count));
+  if (avgRt  > 0) addStat('Avg Run Time',  avgRt  + ' ms', avgRt  > 1000);
+  if (avgCpu > 0) addStat('Avg CPU Time',  avgCpu + ' ms', avgCpu > 500);
+  if (errors > 0) addStat('Errors',        String(errors), true);
+
+  // Row list
+  const sep = document.createElement('div');
+  sep.className = 'row-detail-key';
+  sep.style.marginTop = '14px';
+  sep.textContent = 'Rows (' + Math.min(count, 50) + (count > 50 ? ' of ' + count : '') + ')';
+  panel.appendChild(sep);
+
+  matchingRows.slice(0, 50).forEach(row => {
+    const item = document.createElement('div');
+    item.className = 'chart-detail-row';
+    item.style.cursor = 'pointer';
+
+    // Pick the most meaningful fields to show in the mini row
+    const ts   = row.TIMESTAMP || '';
+    const user = row.USER_ID_DERIVED || row.USER_ID || '';
+    const userName = user ? (currentUserMap[user] || user) : '';
+    const rt   = row.RUN_TIME || row.EXEC_TIME || '';
+    const exc  = row.EXCEPTION_TYPE || row.ERROR_CODE || '';
+    const uri  = row.URI || row.ENTRY_POINT || row.PAGE_APP_NAME || '';
+
+    const tsEl = document.createElement('div');
+    tsEl.className = 'chart-detail-row-ts';
+    tsEl.textContent = ts ? ts.substring(0, 19).replace(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/, '$1-$2-$3 $4:$5:$6') : '—';
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'chart-detail-row-body';
+    const parts = [uri, userName, rt ? rt + ' ms' : ''].filter(Boolean);
+    bodyEl.textContent = parts.join(' · ');
+    if (exc) {
+      bodyEl.style.color = 'var(--red)';
+      bodyEl.textContent = exc + (uri ? ' · ' + uri : '');
+    }
+
+    item.appendChild(tsEl);
+    item.appendChild(bodyEl);
+    item.addEventListener('click', () => showRowDetail(row));
+    panel.appendChild(item);
+  });
+
+  panel.classList.add('open');
+}
+
 // ── Charts renderer ────────────────────────────────────────────────────────
 function renderCharts() {
   const panel = document.getElementById('tab-charts');
@@ -726,17 +815,25 @@ function renderTimelineChart(rows) {
 
   // Bars
   sorted.forEach(([key, count], i) => {
+    const keyMs = Number(key);
     const x  = PAD_L + i * (chartW / sorted.length);
     const bh = Math.max(1, (count / max) * chartH);
     const y  = chartH - bh;
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('class', 'chart-bar');
+    rect.setAttribute('class', 'chart-bar clickable-bar');
     rect.setAttribute('x', x.toFixed(1)); rect.setAttribute('y', y.toFixed(1));
     rect.setAttribute('width', bw.toFixed(1)); rect.setAttribute('height', bh.toFixed(1));
     rect.setAttribute('fill', 'var(--accent)'); rect.setAttribute('rx', '1');
     const t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    t.textContent = fmtMsFull(Number(key)) + ': ' + count + ' event' + (count !== 1 ? 's' : '');
+    t.textContent = fmtMsFull(keyMs) + ': ' + count + ' event' + (count !== 1 ? 's' : '') + ' — click for details';
     rect.appendChild(t);
+    rect.addEventListener('click', () => {
+      const bucketRows = filteredRows.filter(r => {
+        const ms = tsToMs(r.TIMESTAMP);
+        return ms !== null && bucketKey(ms, bucketMs) === keyMs;
+      });
+      showChartDetail(fmtMsFull(keyMs) + ' (' + count + ')', bucketRows);
+    });
     svg.appendChild(rect);
   });
 
@@ -773,14 +870,19 @@ function renderBarChart(rows, col) {
   const wrap = document.createElement('div');
   wrap.className = 'chart-container';
 
-  let entries = topN(rows, col, 12);
-  if (entries.length === 0) return wrap;
+  const rawEntries = topN(rows, col, 12);  // [ [rawValue, count], ... ]
+  if (rawEntries.length === 0) return wrap;
 
-  // Resolve labels for known code columns
-  const isUserCol    = col === 'USER_ID_DERIVED' || col === 'USER_ID';
-  const isQuidCol    = col === 'QUIDDITY';
-  if (isUserCol)  entries = entries.map(([id, n]) => [formatUser(id), n]);
-  if (isQuidCol)  entries = entries.map(([code, n]) => [QUIDDITY_LABELS[code] ? QUIDDITY_LABELS[code] + ' (' + code + ')' : code, n]);
+  // Resolve display labels while keeping raw values for filtering
+  const isUserCol = col === 'USER_ID_DERIVED' || col === 'USER_ID';
+  const isQuidCol = col === 'QUIDDITY';
+  // entries: [ [displayLabel, count, rawValue], ... ]
+  const entries = rawEntries.map(([raw, n]) => {
+    let label = raw;
+    if (isUserCol) label = formatUser(raw);
+    if (isQuidCol) label = QUIDDITY_LABELS[raw] ? QUIDDITY_LABELS[raw] + ' (' + raw + ')' : raw;
+    return [label, n, raw];
+  });
 
   const max     = entries[0][1];
   const labelW  = isUserCol ? 220 : 160;
@@ -798,14 +900,15 @@ function renderBarChart(rows, col) {
   svg.setAttribute('height', H + 10);
   svg.setAttribute('viewBox', `0 0 ${W} ${H + 10}`);
 
-  entries.forEach(([label, count], i) => {
+  entries.forEach(([label, count, rawValue], i) => {
     const y   = i * (barH + gap);
     const bw  = Math.max(2, (count / max) * (W - labelW - 55));
-    const isError = /^[4-5]\d\d$/.test(label) || label.toLowerCase().includes('fail') || label.toLowerCase().includes('error');
+    const isError = /^[4-5]\d\d$/.test(rawValue) || rawValue.toLowerCase().includes('fail') || rawValue.toLowerCase().includes('error');
     const fill = isError ? 'var(--red)' : 'var(--accent)';
     const displayLabel = label.length > 28 ? label.substring(0, 27) + '…' : label;
 
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.style.cursor = 'pointer';
 
     const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     t.setAttribute('x', labelW - 6);
@@ -814,11 +917,11 @@ function renderBarChart(rows, col) {
     t.setAttribute('class', 'chart-axis-label');
     t.textContent = displayLabel;
     const tTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    tTitle.textContent = label;
+    tTitle.textContent = label + ': ' + count + ' event' + (count !== 1 ? 's' : '') + ' — click for details';
     t.appendChild(tTitle);
 
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('class', 'chart-bar');
+    rect.setAttribute('class', 'chart-bar clickable-bar');
     rect.setAttribute('x', labelW);
     rect.setAttribute('y', y);
     rect.setAttribute('width', bw.toFixed(1));
@@ -826,7 +929,7 @@ function renderBarChart(rows, col) {
     rect.setAttribute('fill', fill);
     rect.setAttribute('rx', 2);
     const rTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    rTitle.textContent = label + ': ' + count + ' event' + (count !== 1 ? 's' : '');
+    rTitle.textContent = label + ': ' + count + ' event' + (count !== 1 ? 's' : '') + ' — click for details';
     rect.appendChild(rTitle);
 
     const val = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -838,6 +941,13 @@ function renderBarChart(rows, col) {
     g.appendChild(t);
     g.appendChild(rect);
     g.appendChild(val);
+
+    // Click → show matching rows in detail panel
+    g.addEventListener('click', () => {
+      const matchingRows = filteredRows.filter(r => (r[col] || '(blank)') === rawValue);
+      showChartDetail(label + ' (' + count + ')', matchingRows);
+    });
+
     svg.appendChild(g);
   });
 
