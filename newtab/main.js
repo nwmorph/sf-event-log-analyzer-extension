@@ -174,9 +174,9 @@ function applyFilters() {
 
 // ── Quick filter definitions ───────────────────────────────────────────────
 const QUICK_FILTER_DEFS = {
-  errors:    { label: 'Errors only',    cls: 'chip-red',   test: r => { const s = parseInt(r.STATUS_CODE || r.EXCEPTION_TYPE ? '999' : '0'); return s >= 400 || !!r.EXCEPTION_TYPE; } },
-  slow:      { label: 'Slow (>1s)',     cls: 'chip-amber', test: r => parseInt(r.RUN_TIME || 0) > 1000 },
-  external:  { label: 'External IPs',  cls: '',           test: r => { const ip = r.CLIENT_IP || ''; return ip && ip !== 'Salesforce.com IP' && !/^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip); } },
+  errors:    { label: 'Errors only',       cls: 'chip-red',   test: r => parseInt(r.STATUS_CODE || 0) >= 400 || !!r.EXCEPTION_TYPE },
+  slow:      { label: 'Slow (>1s)',        cls: 'chip-amber', test: r => parseInt(r.RUN_TIME || r.EXEC_TIME || 0) > 1000 },
+  external:  { label: 'External IPs',     cls: '',           test: r => { const ip = r.CLIENT_IP || ''; return !!ip && ip !== 'Salesforce.com IP' && !/^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.|::1)/.test(ip); } },
   cpu_heavy: { label: 'High CPU (>500ms)', cls: 'chip-amber', test: r => parseInt(r.CPU_TIME || 0) > 500 },
 };
 
@@ -444,9 +444,22 @@ function renderGenericOverview(rows, headers) {
     { label: 'Columns', value: headers.length },
   ]);
   stringCols.forEach(col => {
-    const entries = topN(rows, col, 8);
-    if (entries.length > 1) html += topNSection(`Top: ${col}`, entries, rows.length);
+    let entries = topN(rows, col, 8);
+    // Resolve user IDs to names for user columns
+    if (/USER_ID/i.test(col)) {
+      entries = entries.map(([id, count]) => [formatUser(id), count]);
+    }
+    if (entries.length > 1) html += topNSection(col, entries, rows.length);
   });
+  // Always show user breakdown if a user column exists and wasn't already included
+  const userCol = ['USER_ID_DERIVED','USER_ID'].find(c => headers.includes(c) && !stringCols.includes(c));
+  if (userCol) {
+    const userCounts = {};
+    rows.forEach(r => { const id = r[userCol] || '(unknown)'; userCounts[id] = (userCounts[id] || 0) + 1; });
+    const userEntries = Object.entries(userCounts).sort((a,b) => b[1]-a[1]).slice(0,8)
+      .map(([id, count]) => [formatUser(id), count]);
+    if (userEntries.length > 0) html += topNSection('Most Active Users', userEntries, rows.length, 'var(--amber)');
+  }
   return html;
 }
 
@@ -581,69 +594,178 @@ function renderCharts() {
   }
 
   // Bar charts for key categorical columns
-  const catCols = ['STATUS_CODE','METHOD','EXCEPTION_TYPE','LOGIN_STATUS','API_TYPE','ENTITY_TYPE'].filter(c => headers.includes(c));
+  const catCols = ['STATUS_CODE','METHOD','EXCEPTION_TYPE','LOGIN_STATUS','API_TYPE','ENTITY_TYPE',
+                   'QUIDDITY','ENTRY_POINT','USER_ID_DERIVED','USER_ID'].filter(c => headers.includes(c));
   catCols.forEach(col => panel.appendChild(renderBarChart(rows, col)));
+}
+
+function formatBucketLabel(key) {
+  // key is like "20260620092" (YYYYMMDDThh without separator) or "2026-06-20T09"
+  try {
+    const norm = key.length === 11
+      ? key.substring(0,4) + '-' + key.substring(4,6) + '-' + key.substring(6,8) + 'T' + key.substring(8,10) + ':00:00Z'
+      : key + ':00:00Z';
+    const d = new Date(norm);
+    if (isNaN(d)) return key;
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  } catch { return key; }
 }
 
 function renderTimelineChart(rows) {
   const wrap = document.createElement('div');
   wrap.className = 'chart-container';
 
-  // Bucket by hour
+  // Bucket by hour — detect format from first non-empty timestamp
   const buckets = {};
   rows.forEach(r => {
     const ts = r.TIMESTAMP || '';
-    const hour = ts.substring(0, 13); // "YYYYMMDDTHH" or "YYYY-MM-DDTHH"
-    if (hour) buckets[hour] = (buckets[hour] || 0) + 1;
+    // Salesforce timestamps: "20260620092205.750" or "2026-06-20T09:22:05.000+0000"
+    const hour = ts.includes('-') ? ts.substring(0, 13) : ts.substring(0, 10);
+    if (hour && hour.length >= 8) buckets[hour] = (buckets[hour] || 0) + 1;
   });
   const sorted = Object.entries(buckets).sort((a,b) => a[0].localeCompare(b[0]));
-  if (sorted.length < 2) { wrap.innerHTML = '<div class="chart-title">Timeline</div><p style="color:var(--muted);font-size:0.8rem">Not enough time data to chart.</p>'; return wrap; }
+  if (sorted.length < 2) {
+    const msg = document.createElement('p');
+    msg.style.cssText = 'color:var(--muted);font-size:0.8rem;margin:8px 0';
+    msg.textContent = 'Not enough time data to chart.';
+    const t = document.createElement('div');
+    t.className = 'chart-title';
+    t.textContent = 'Events over Time';
+    wrap.appendChild(t);
+    wrap.appendChild(msg);
+    return wrap;
+  }
 
   const max = Math.max(...sorted.map(e=>e[1]));
-  const W = 600, H = 120, PAD = 30;
-  const bw = Math.max(2, (W - PAD) / sorted.length - 1);
+  const W = 620, H = 140, PAD_L = 36, PAD_B = 24;
+  const chartW = W - PAD_L;
+  const chartH = H - PAD_B;
+  const bw = Math.max(2, chartW / sorted.length - 1);
 
-  const bars = sorted.map(([ , count], i) => {
-    const x = PAD + i * ((W - PAD) / sorted.length);
-    const bh = Math.max(1, (count / max) * (H - 20));
-    const y = H - bh - 10;
-    return `<rect class="chart-bar" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--accent)" rx="1"><title>${sorted[i][0]}: ${sorted[i][1]}</title></rect>`;
+  // Y-axis gridlines
+  const gridLines = [0.25, 0.5, 0.75, 1].map(frac => {
+    const y = PAD_B + chartH * (1 - frac) - PAD_B;
+    const val = Math.round(max * frac);
+    return `<line x1="${PAD_L}" y1="${y}" x2="${W}" y2="${y}" stroke="var(--border)" stroke-width="0.5" opacity="0.5"/>
+            <text x="${PAD_L - 4}" y="${y + 4}" text-anchor="end" class="chart-axis-label">${val}</text>`;
   }).join('');
 
-  wrap.innerHTML = `<div class="chart-title">Events over Time</div>
-    <svg class="chart-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-      ${bars}
-      <text x="${PAD}" y="${H}" class="chart-axis-label">${sorted[0][0]}</text>
-      <text x="${W-4}" y="${H}" class="chart-axis-label" text-anchor="end">${sorted[sorted.length-1][0]}</text>
-    </svg>`;
+  const bars = sorted.map(([key, count], i) => {
+    const x = PAD_L + i * (chartW / sorted.length);
+    const bh = Math.max(1, (count / max) * chartH);
+    const y = chartH - bh;
+    const label = formatBucketLabel(key);
+    return `<rect class="chart-bar" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" fill="var(--accent)" rx="1">
+      <title>${label}: ${count} event${count !== 1 ? 's' : ''}</title>
+    </rect>`;
+  }).join('');
+
+  const firstLabel = formatBucketLabel(sorted[0][0]);
+  const lastLabel  = formatBucketLabel(sorted[sorted.length-1][0]);
+
+  const title = document.createElement('div');
+  title.className = 'chart-title';
+  title.textContent = 'Events over Time';
+  wrap.appendChild(title);
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'chart-svg');
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = gridLines + bars
+    + `<text x="${PAD_L}" y="${H}" class="chart-axis-label">${escapeHtml(firstLabel)}</text>`
+    + `<text x="${W}" y="${H}" text-anchor="end" class="chart-axis-label">${escapeHtml(lastLabel)}</text>`;
+  wrap.appendChild(svg);
   return wrap;
 }
+
+const BAR_CHART_TITLES = {
+  STATUS_CODE:     'HTTP Status Codes',
+  METHOD:          'HTTP Methods',
+  EXCEPTION_TYPE:  'Exception Types',
+  LOGIN_STATUS:    'Login Status',
+  API_TYPE:        'API Types',
+  ENTITY_TYPE:     'Entity Types',
+  QUIDDITY:        'Execution Types',
+  ENTRY_POINT:     'Entry Points',
+  USER_ID_DERIVED: 'Most Active Users',
+  USER_ID:         'Most Active Users',
+};
 
 function renderBarChart(rows, col) {
   const wrap = document.createElement('div');
   wrap.className = 'chart-container';
-  const entries = topN(rows, col, 12);
+
+  let entries = topN(rows, col, 12);
   if (entries.length === 0) return wrap;
 
-  const max = entries[0][1];
-  const W = 500, barH = 20, gap = 5;
-  const H = entries.length * (barH + gap);
-  const labelW = 160;
+  // Resolve labels for known code columns
+  const isUserCol    = col === 'USER_ID_DERIVED' || col === 'USER_ID';
+  const isQuidCol    = col === 'QUIDDITY';
+  if (isUserCol)  entries = entries.map(([id, n]) => [formatUser(id), n]);
+  if (isQuidCol)  entries = entries.map(([code, n]) => [QUIDDITY_LABELS[code] ? QUIDDITY_LABELS[code] + ' (' + code + ')' : code, n]);
 
-  const bars = entries.map(([label, count], i) => {
-    const y = i * (barH + gap);
-    const bw = Math.max(2, (count / max) * (W - labelW - 50));
+  const max     = entries[0][1];
+  const labelW  = isUserCol ? 220 : 160;
+  const W       = 560, barH = 22, gap = 6;
+  const H       = entries.length * (barH + gap);
+
+  const title = document.createElement('div');
+  title.className = 'chart-title';
+  title.textContent = BAR_CHART_TITLES[col] || col;
+  wrap.appendChild(title);
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'chart-svg');
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H + 10);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H + 10}`);
+
+  entries.forEach(([label, count], i) => {
+    const y   = i * (barH + gap);
+    const bw  = Math.max(2, (count / max) * (W - labelW - 55));
     const isError = /^[4-5]\d\d$/.test(label) || label.toLowerCase().includes('fail') || label.toLowerCase().includes('error');
     const fill = isError ? 'var(--red)' : 'var(--accent)';
-    return `<g>
-      <text x="${labelW - 6}" y="${y + barH - 5}" text-anchor="end" class="chart-axis-label" title="${escapeHtml(label)}">${escapeHtml(label.substring(0,22))}${label.length>22?'…':''}</text>
-      <rect class="chart-bar" x="${labelW}" y="${y}" width="${bw.toFixed(1)}" height="${barH}" fill="${fill}" rx="2"><title>${label}: ${count}</title></rect>
-      <text x="${labelW + bw + 4}" y="${y + barH - 5}" class="chart-value-label">${count}</text>
-    </g>`;
-  }).join('');
+    const displayLabel = label.length > 28 ? label.substring(0, 27) + '…' : label;
 
-  wrap.innerHTML = `<div class="chart-title">${escapeHtml(col)}</div>
-    <svg class="chart-svg" width="${W}" height="${H + 10}" viewBox="0 0 ${W} ${H + 10}">${bars}</svg>`;
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+
+    const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    t.setAttribute('x', labelW - 6);
+    t.setAttribute('y', y + barH - 5);
+    t.setAttribute('text-anchor', 'end');
+    t.setAttribute('class', 'chart-axis-label');
+    t.textContent = displayLabel;
+    const tTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    tTitle.textContent = label;
+    t.appendChild(tTitle);
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('class', 'chart-bar');
+    rect.setAttribute('x', labelW);
+    rect.setAttribute('y', y);
+    rect.setAttribute('width', bw.toFixed(1));
+    rect.setAttribute('height', barH);
+    rect.setAttribute('fill', fill);
+    rect.setAttribute('rx', 2);
+    const rTitle = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    rTitle.textContent = label + ': ' + count + ' event' + (count !== 1 ? 's' : '');
+    rect.appendChild(rTitle);
+
+    const val = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    val.setAttribute('x', labelW + bw + 6);
+    val.setAttribute('y', y + barH - 5);
+    val.setAttribute('class', 'chart-value-label');
+    val.textContent = count;
+
+    g.appendChild(t);
+    g.appendChild(rect);
+    g.appendChild(val);
+    svg.appendChild(g);
+  });
+
+  wrap.appendChild(svg);
   return wrap;
 }
 
