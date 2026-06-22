@@ -71,6 +71,7 @@ let currentCsvData = null;   // { headers, rows }
 let currentCsvText = '';     // raw CSV text for the Raw CSV tab
 let currentLoadId = 0;       // increments each time a new log is loaded
 let currentUserMap = {};     // { userId: 'Full Name' }
+let currentPrefixMap = {};   // { 'abc': { label: 'Account', api: 'Account' } | null }
 let filteredRows = [];        // after search + quick filters
 let activeQuickFilters = new Set();
 let sortCol = null;
@@ -78,11 +79,12 @@ let sortDir = 'asc';
 let currentEventType = '';
 
 // ── Entry point ────────────────────────────────────────────────────────────
-function analyseEventLog(csvText, eventType, meta, userMap) {
+function analyseEventLog(csvText, eventType, meta, userMap, prefixMap) {
   currentEventType = eventType || '';
   currentCsvText = csvText || '';
   currentLoadId++;
   currentUserMap = userMap || {};
+  currentPrefixMap = prefixMap || {};
   currentCsvData = parseCsv(csvText);
   filteredRows = [...currentCsvData.rows];
   activeQuickFilters.clear();
@@ -358,6 +360,13 @@ function formatUser(id) {
   return currentUserMap[id] ? currentUserMap[id] + ' (' + id + ')' : id;
 }
 
+function formatPrefix(prefix) {
+  if (!prefix) return prefix;
+  const info = currentPrefixMap[prefix];
+  if (!info) return prefix;
+  return info.label + ' (' + info.api + ')';
+}
+
 function renderApexExecutionOverview(rows, headers) {
   const total  = rows.length;
   const avgRt  = total ? Math.round(rows.reduce((s, r) => s + parseInt(r.EXEC_TIME || r.RUN_TIME || 0), 0) / total) : 0;
@@ -445,10 +454,8 @@ function renderGenericOverview(rows, headers) {
   ]);
   stringCols.forEach(col => {
     let entries = topN(rows, col, 8);
-    // Resolve user IDs to names for user columns
-    if (/USER_ID/i.test(col)) {
-      entries = entries.map(([id, count]) => [formatUser(id), count]);
-    }
+    if (/USER_ID/i.test(col)) entries = entries.map(([id, count]) => [formatUser(id), count]);
+    if (col === 'KEY_PREFIX')  entries = entries.map(([p, count]) => [formatPrefix(p) || p, count]);
     if (entries.length > 1) html += topNSection(colLabel(col), entries, rows.length);
   });
   // Always show user breakdown if a user column exists and wasn't already included
@@ -552,9 +559,12 @@ function renderTable() {
         else if (h === 'EXCEPTION_TYPE' && v) cls = 'td-error';
         else if (h === 'LOGIN_STATUS' && v && v !== 'LOGIN_NO_ERROR' && v !== 'Success') cls = 'td-error';
         else if ((h === 'RUN_TIME' || h === 'CPU_TIME' || h === 'EXEC_TIME') && parseInt(v) > 1000) cls = 'td-warn';
-        const isUserCol = (h === 'USER_ID_DERIVED' || h === 'USER_ID') && v;
-        const display = isUserCol ? (currentUserMap[v] || v) : v;
-        const tooltip = isUserCol && currentUserMap[v] ? v : display;
+        const isUserCol   = (h === 'USER_ID_DERIVED' || h === 'USER_ID') && v;
+        const isPrefixCol = h === 'KEY_PREFIX' && v;
+        const display = isUserCol   ? (currentUserMap[v] || v)
+                      : isPrefixCol ? (currentPrefixMap[v] ? currentPrefixMap[v].label + ' (' + currentPrefixMap[v].api + ')' : v)
+                      : v;
+        const tooltip = (isUserCol && currentUserMap[v]) || (isPrefixCol && currentPrefixMap[v]) ? v : display;
         return `<td class="${cls}" title="${escapeHtml(tooltip)}">${escapeHtml(display.substring(0,80))}${display.length>80?'…':''}</td>`;
       }).join('')}
     </tr>`;
@@ -922,13 +932,15 @@ function renderBarChart(rows, col) {
   if (rawEntries.length === 0) return wrap;
 
   // Resolve display labels while keeping raw values for filtering
-  const isUserCol = col === 'USER_ID_DERIVED' || col === 'USER_ID';
-  const isQuidCol = col === 'QUIDDITY';
+  const isUserCol   = col === 'USER_ID_DERIVED' || col === 'USER_ID';
+  const isQuidCol   = col === 'QUIDDITY';
+  const isPrefixCol = col === 'KEY_PREFIX';
   // entries: [ [displayLabel, count, rawValue], ... ]
   const entries = rawEntries.map(([raw, n]) => {
     let label = raw;
-    if (isUserCol) label = formatUser(raw);
-    if (isQuidCol) label = QUIDDITY_LABELS[raw] ? QUIDDITY_LABELS[raw] + ' (' + raw + ')' : raw;
+    if (isUserCol)   label = formatUser(raw);
+    if (isQuidCol)   label = QUIDDITY_LABELS[raw] ? QUIDDITY_LABELS[raw] + ' (' + raw + ')' : raw;
+    if (isPrefixCol) label = formatPrefix(raw) || raw;
     return [label, n, raw];
   });
 

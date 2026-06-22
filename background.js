@@ -39,6 +39,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'fetchKeyPrefixes') {
+    fetchKeyPrefixes(message.orgUrl, message.prefixes)
+      .then(map => sendResponse({ ok: true, map }))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
   if (message.type === 'fetchOrgInfo') {
     fetchOrgInfo(message.orgUrl)
       .then(info => sendResponse({ ok: true, info }))
@@ -155,6 +162,26 @@ async function fetchUsers(orgUrl, ids) {
   (data.records || []).forEach(u => {
     map[u.Id] = u.Name;          // 18-char key
     map[u.Id.substring(0, 15)] = u.Name;  // 15-char key for lookups from CSV
+  });
+  return map;
+}
+
+async function fetchKeyPrefixes(orgUrl, prefixes) {
+  if (!prefixes || prefixes.length === 0) return {};
+  const sid = await getSessionToken(orgUrl);
+  const apiUrl = toApiUrl(orgUrl);
+  const prefixList = prefixes.map(p => `'${p}'`).join(',');
+  const q = encodeURIComponent(
+    `SELECT KeyPrefix, QualifiedApiName, Label FROM EntityDefinition WHERE KeyPrefix IN (${prefixList}) LIMIT 500`
+  );
+  const res = await fetch(`${apiUrl}/services/data/${API_VERSION}/tooling/query/?q=${q}`, {
+    headers: { 'Authorization': `Bearer ${sid}` }
+  });
+  if (!res.ok) return {};
+  const data = await res.json();
+  const map = {};
+  (data.records || []).forEach(e => {
+    if (e.KeyPrefix) map[e.KeyPrefix] = { label: e.Label, api: e.QualifiedApiName };
   });
   return map;
 }

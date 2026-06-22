@@ -3,6 +3,7 @@ let orgUrl = '';
 let allFiles = [];      // raw EventLogFile records from last fetch
 let selectedFileId = null;
 let userNames = {};     // { userId: 'Full Name' }
+let keyPrefixMap = {};  // { 'abc': { label: 'Account', api: 'Account' } }
 
 // ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
@@ -284,32 +285,54 @@ function selectFile(rowEl) {
         showMainError(response.error || 'Failed to download log file.');
         return;
       }
-      // Extract user IDs from CSV header before rendering so overviews show names
+      // Extract user IDs and key prefixes from CSV before rendering
       const headerCols = response.text.split('\n')[0].split(',').map(h => h.trim().replace(/"/g,''));
-      const userColIndices = ['USER_ID_DERIVED', 'USER_ID']
-        .map(name => headerCols.indexOf(name)).filter(i => i >= 0);
-      if (userColIndices.length > 0) {
-        const csvLines = response.text.split(/\r?\n/).slice(1);
-        const ids = [...new Set(
-          csvLines.flatMap(l => {
-            const parts = l.split(',');
-            return userColIndices.map(i => parts[i]?.trim().replace(/"/g,''));
-          }).filter(Boolean)
-        )];
-        fetchUserNamesForIds(ids).then(() => analyseEventLog(response.text, type, { date, interval, size }, userNames));
-      } else {
-        analyseEventLog(response.text, type, { date, interval, size }, userNames);
-      }
+      const csvLines   = response.text.split(/\r?\n/).slice(1);
+
+      const userColIndices   = ['USER_ID_DERIVED', 'USER_ID'].map(n => headerCols.indexOf(n)).filter(i => i >= 0);
+      const prefixColIndices = ['KEY_PREFIX'].map(n => headerCols.indexOf(n)).filter(i => i >= 0);
+
+      const ids = userColIndices.length > 0 ? [...new Set(
+        csvLines.flatMap(l => {
+          const parts = l.split(',');
+          return userColIndices.map(i => parts[i]?.trim().replace(/"/g,''));
+        }).filter(Boolean)
+      )] : [];
+
+      const prefixes = prefixColIndices.length > 0 ? [...new Set(
+        csvLines.flatMap(l => {
+          const parts = l.split(',');
+          return prefixColIndices.map(i => parts[i]?.trim().replace(/"/g,''));
+        }).filter(Boolean)
+      )] : [];
+
+      Promise.all([
+        fetchUserNamesForIds(ids),
+        fetchKeyPrefixesForValues(prefixes),
+      ]).then(() => analyseEventLog(response.text, type, { date, interval, size }, userNames, keyPrefixMap));
     }
   );
 }
 
 // ── User name prefetch ─────────────────────────────────────────────────────
 function prefetchUsers() {
-  // Collect unique 15/18-char user IDs from the file list (CreatedById not present,
-  // so we'll resolve from CSV rows lazily — just seed with an empty map for now
-  // and let the CSV fetch trigger a lookup of the IDs actually in that file)
   userNames = {};
+}
+
+// ── Key prefix lookup ──────────────────────────────────────────────────────
+function fetchKeyPrefixesForValues(prefixes) {
+  const unknown = prefixes.filter(p => p && !(p in keyPrefixMap));
+  if (unknown.length === 0) return Promise.resolve();
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({ type: 'fetchKeyPrefixes', orgUrl, prefixes: unknown }, (response) => {
+      if (!chrome.runtime.lastError && response && response.ok) {
+        Object.assign(keyPrefixMap, response.map);
+        // Mark unfound prefixes so we don't re-query them
+        unknown.forEach(p => { if (!(p in keyPrefixMap)) keyPrefixMap[p] = null; });
+      }
+      resolve();
+    });
+  });
 }
 
 function fetchUserNamesForIds(ids) {
