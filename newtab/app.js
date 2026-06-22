@@ -126,11 +126,81 @@ async function populateOrgSwitcher() {
   });
 }
 
+// ── File search across multiple files ─────────────────────────────────────
+let fileSearchResults = {};   // { fileId: matchCount | 'loading' | 'error' }
+let fileSearchActive  = false;
+
+async function runFileSearch() {
+  const q = document.getElementById('file-search-input').value.trim().toLowerCase();
+  if (!q) { clearFileSearch(); return; }
+
+  const typeFilter     = document.getElementById('filter-type').value;
+  const intervalFilter = document.getElementById('filter-interval').value;
+  let files = allFiles;
+  if (typeFilter)     files = files.filter(f => f.EventType === typeFilter);
+  if (intervalFilter) files = files.filter(f => f.Interval  === intervalFilter);
+  if (files.length === 0) return;
+
+  fileSearchActive  = true;
+  fileSearchResults = {};
+  files.forEach(f => { fileSearchResults[f.Id] = 'loading'; });
+
+  const statusEl = document.getElementById('file-search-status');
+  statusEl.style.display = '';
+  statusEl.textContent   = 'Searching ' + files.length + ' file' + (files.length !== 1 ? 's' : '') + '…';
+
+  renderFileList();   // show loading badges immediately
+
+  // Fetch files with concurrency of 4
+  const CONCURRENCY = 4;
+  let idx = 0;
+  async function next() {
+    if (idx >= files.length) return;
+    const f = files[idx++];
+    try {
+      const text = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'fetchEventLogCsv', orgUrl, logId: f.Id }, (r) => {
+          if (chrome.runtime.lastError || !r.ok) reject(new Error(r?.error || 'fetch failed'));
+          else resolve(r.text);
+        });
+      });
+      // Count lines (excluding header) that contain the query string
+      const lines = text.split('\n');
+      const count = lines.slice(1).filter(l => l.toLowerCase().includes(q)).length;
+      fileSearchResults[f.Id] = count;
+    } catch {
+      fileSearchResults[f.Id] = 'error';
+    }
+    renderFileList();
+    await next();
+  }
+
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, next));
+
+  const total = Object.values(fileSearchResults).reduce((s, v) => s + (typeof v === 'number' ? v : 0), 0);
+  statusEl.textContent = 'Found ' + total.toLocaleString() + ' match' + (total !== 1 ? 'es' : '') + ' across ' + files.length + ' file' + (files.length !== 1 ? 's' : '');
+}
+
+function clearFileSearch() {
+  fileSearchActive  = false;
+  fileSearchResults = {};
+  const statusEl = document.getElementById('file-search-status');
+  if (statusEl) statusEl.style.display = 'none';
+  renderFileList();
+}
+
 // ── Filter wiring ───────────────────────────────────────────────────────────
 function setupFilterListeners() {
   document.getElementById('btn-refresh').addEventListener('click', doRefresh);
   document.getElementById('filter-type').addEventListener('change', renderFileList);
   document.getElementById('filter-interval').addEventListener('change', renderFileList);
+  document.getElementById('btn-file-search').addEventListener('click', runFileSearch);
+  document.getElementById('file-search-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') runFileSearch();
+  });
+  document.getElementById('file-search-input').addEventListener('input', e => {
+    if (!e.target.value.trim()) clearFileSearch();
+  });
 }
 
 // ── Refresh ────────────────────────────────────────────────────────────────
@@ -286,6 +356,24 @@ function renderFileList() {
       row.appendChild(dateEl);
       if (f.Interval) row.appendChild(intervalEl);
       row.appendChild(sizeEl);
+
+      if (fileSearchActive) {
+        const matchEl = document.createElement('span');
+        matchEl.className = 'log-file-match';
+        const result = fileSearchResults[f.Id];
+        if (result === 'loading') {
+          matchEl.textContent = '…';
+          matchEl.className += ' match-loading';
+        } else if (result === 'error') {
+          matchEl.textContent = '!';
+          matchEl.className += ' match-error';
+        } else {
+          matchEl.textContent = result > 0 ? result.toLocaleString() : '—';
+          matchEl.className  += result > 0 ? ' match-hit' : ' match-none';
+        }
+        row.appendChild(matchEl);
+      }
+
       row.addEventListener('click', () => selectFile(row));
       filesDiv.appendChild(row);
     });

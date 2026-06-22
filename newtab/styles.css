@@ -155,6 +155,44 @@ body {
   border-color: var(--accent);
 }
 
+.file-search-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.file-search-input { flex: 1; }
+.btn-search {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--fg);
+  font-size: 1rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.1s;
+}
+.btn-search:hover { background: var(--hover); }
+.file-search-status {
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding: 4px 0 2px;
+  text-align: center;
+}
+.log-file-match {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.match-hit     { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+.match-none    { color: var(--muted); background: none; }
+.match-loading { color: var(--muted); background: none; }
+.match-error   { color: var(--red); background: none; }
+
 .btn-primary {
   margin-top: 4px;
   padding: 6px 12px;
