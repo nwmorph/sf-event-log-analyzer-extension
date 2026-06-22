@@ -808,9 +808,10 @@ function renderCharts() {
     panel.appendChild(renderTimelineChart(rows));
   }
 
-  // Bar charts for key categorical columns
+  // Bar charts for key categorical columns — use only one user column (prefer USER_ID_DERIVED)
+  const userCol = ['USER_ID_DERIVED', 'USER_ID'].find(c => headers.includes(c));
   const catCols = ['STATUS_CODE','METHOD','EXCEPTION_TYPE','LOGIN_STATUS','API_TYPE','ENTITY_TYPE',
-                   'QUIDDITY','ENTRY_POINT','USER_ID_DERIVED','USER_ID'].filter(c => headers.includes(c));
+                   'QUIDDITY','ENTRY_POINT', ...(userCol ? [userCol] : [])].filter(c => headers.includes(c));
   catCols.forEach(col => panel.appendChild(renderBarChart(rows, col)));
 }
 

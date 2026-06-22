@@ -290,20 +290,23 @@ function selectFile(rowEl) {
         showMainError(response.error || 'Failed to download log file.');
         return;
       }
-      // Parse CSV properly (parseCsv is defined in main.js, loaded before app.js)
-      const parsed = parseCsv(response.text);
-      const headers = parsed.headers;
+      // Extract user IDs and key prefixes from the header line + regex scan
+      // — avoids a full parseCsv() on potentially very large files just for ID extraction
+      const firstLine  = response.text.substring(0, response.text.indexOf('\n'));
+      const headerCols = firstLine.split(',').map(h => h.trim().replace(/"/g, ''));
 
-      const userCols   = ['USER_ID_DERIVED', 'USER_ID'].filter(n => headers.includes(n));
-      const prefixCols = ['KEY_PREFIX'].filter(n => headers.includes(n));
+      // Extract unique 15/18-char Salesforce IDs from the whole text via regex
+      const sfIdRe = /\b([A-Za-z0-9]{15}|[A-Za-z0-9]{18})\b/g;
+      const allIds = [...new Set(response.text.match(sfIdRe) || [])];
 
-      const ids = userCols.length > 0 ? [...new Set(
-        parsed.rows.flatMap(r => userCols.map(c => r[c])).filter(Boolean)
-      )] : [];
+      // Filter to only values that appear in user columns (check if the column exists)
+      const hasUserCol   = ['USER_ID_DERIVED', 'USER_ID'].some(n => headerCols.includes(n));
+      const hasPrefixCol = headerCols.includes('KEY_PREFIX');
 
-      const prefixes = prefixCols.length > 0 ? [...new Set(
-        parsed.rows.flatMap(r => prefixCols.map(c => r[c])).filter(Boolean)
-      )] : [];
+      // For user IDs: keep only 15/18-char IDs starting with 005 (User prefix)
+      const ids      = hasUserCol   ? allIds.filter(id => id.startsWith('005')) : [];
+      // For key prefixes: extract 3-char alphanumeric values from KEY_PREFIX column via regex
+      const prefixes = hasPrefixCol ? [...new Set((response.text.match(/(?<=,|\n)([A-Za-z0-9]{3})(?=,)/g) || []))] : [];
 
       Promise.all([
         fetchUserNamesForIds(ids),
