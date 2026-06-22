@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadOrgUrl();
   await populateOrgSwitcher();
   setupFilterListeners();
+  if (orgUrl) doRefresh();
 });
 
 function setDefaultDateRange() {
