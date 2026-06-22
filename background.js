@@ -38,6 +38,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(err => sendResponse({ ok: false, error: err.message }));
     return true;
   }
+
+  if (message.type === 'fetchOrgInfo') {
+    fetchOrgInfo(message.orgUrl)
+      .then(info => sendResponse({ ok: true, info }))
+      .catch(err => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
 });
 
 // ── URL helpers ────────────────────────────────────────────────────────────
@@ -115,11 +122,29 @@ async function fetchEventLogCsv(orgUrl, logId) {
   return text;
 }
 
+function to18(id) {
+  if (!id || id.length === 18) return id;
+  if (id.length !== 15) return id;
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ012345';
+  let suffix = '';
+  for (let i = 0; i < 3; i++) {
+    let n = 0;
+    for (let j = 0; j < 5; j++) {
+      const c = id[i * 5 + j];
+      if (c >= 'A' && c <= 'Z') n += 1 << j;
+    }
+    suffix += chars[n];
+  }
+  return id + suffix;
+}
+
 async function fetchUsers(orgUrl, ids) {
   if (!ids || ids.length === 0) return {};
   const sid = await getSessionToken(orgUrl);
   const apiUrl = toApiUrl(orgUrl);
-  const idList = ids.slice(0, 200).map(id => `'${id}'`).join(',');
+  // Normalise to 18-char so the SOQL IN clause matches
+  const ids18 = [...new Set(ids.map(to18))];
+  const idList = ids18.slice(0, 200).map(id => `'${id}'`).join(',');
   const q = encodeURIComponent(`SELECT Id, Name FROM User WHERE Id IN (${idList}) LIMIT 200`);
   const res = await fetch(`${apiUrl}/services/data/${API_VERSION}/query/?q=${q}`, {
     headers: { 'Authorization': `Bearer ${sid}` }
@@ -127,6 +152,21 @@ async function fetchUsers(orgUrl, ids) {
   if (!res.ok) return {};
   const data = await res.json();
   const map = {};
-  (data.records || []).forEach(u => { map[u.Id] = u.Name; });
+  (data.records || []).forEach(u => {
+    map[u.Id] = u.Name;          // 18-char key
+    map[u.Id.substring(0, 15)] = u.Name;  // 15-char key for lookups from CSV
+  });
   return map;
+}
+
+async function fetchOrgInfo(orgUrl) {
+  const sid = await getSessionToken(orgUrl);
+  const apiUrl = toApiUrl(orgUrl);
+  const q = encodeURIComponent('SELECT Name, InstanceName, IsSandbox FROM Organization LIMIT 1');
+  const res = await fetch(`${apiUrl}/services/data/${API_VERSION}/query/?q=${q}`, {
+    headers: { 'Authorization': `Bearer ${sid}` }
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.records && data.records[0] ? data.records[0] : null;
 }

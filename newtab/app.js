@@ -28,7 +28,7 @@ async function loadOrgUrl() {
   const result = await chrome.storage.session.get('orgUrl');
   if (result.orgUrl) {
     orgUrl = result.orgUrl;
-    showOrgLabel(orgUrl);
+    showOrgLabel(orgUrl, null);
     return;
   }
 
@@ -41,21 +41,35 @@ async function loadOrgUrl() {
       const origin = new URL(sfTab.url).origin;
       orgUrl = origin;
       await chrome.storage.session.set({ orgUrl: origin });
-      showOrgLabel(orgUrl);
+      showOrgLabel(orgUrl, null);
     } catch { /* ignore malformed URL */ }
   }
 }
 
-function showOrgLabel(url) {
+function showOrgLabel(url, orgInfo) {
   const el = document.getElementById('sidebar-org');
   if (!el) return;
   try {
     const host = new URL(url).hostname;
-    el.textContent = host.split('.')[0] || host;
-    el.title = url;
+    if (orgInfo && orgInfo.Name) {
+      el.textContent = orgInfo.Name + (orgInfo.IsSandbox ? ' (Sandbox)' : '');
+      el.title = orgInfo.Name + ' · ' + host + (orgInfo.InstanceName ? ' · ' + orgInfo.InstanceName : '');
+    } else {
+      el.textContent = host.split('.')[0] || host;
+      el.title = url;
+    }
   } catch {
     el.textContent = url;
   }
+}
+
+function fetchAndShowOrgInfo() {
+  if (!orgUrl) return;
+  chrome.runtime.sendMessage({ type: 'fetchOrgInfo', orgUrl }, (response) => {
+    if (!chrome.runtime.lastError && response && response.ok && response.info) {
+      showOrgLabel(orgUrl, response.info);
+    }
+  });
 }
 
 // ── Filter wiring ──────────────────────────────────────────────────────────
@@ -101,9 +115,9 @@ async function doRefresh() {
       allFiles = response.data.records || [];
       populateTypeFilter(allFiles);
       renderFileList();
-      showOrgLabel(orgUrl);
+      showOrgLabel(orgUrl, null);
       showMainEmpty();
-      // Fetch user names in the background — overviews will use them when ready
+      fetchAndShowOrgInfo();
       prefetchUsers();
     }
   );
