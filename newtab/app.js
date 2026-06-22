@@ -23,10 +23,25 @@ function toDateInputValue(d) {
 }
 
 async function loadOrgUrl() {
+  // First try storage (set by content script when a SF tab was visited)
   const result = await chrome.storage.session.get('orgUrl');
   if (result.orgUrl) {
     orgUrl = result.orgUrl;
     showOrgLabel(orgUrl);
+    return;
+  }
+
+  // Fallback: scan open tabs for a Salesforce URL directly
+  const SF_PATTERN = /^https:\/\/[^/]+\.(salesforce\.com|force\.com|lightning\.force\.com|my\.salesforce\.com)/;
+  const tabs = await chrome.tabs.query({});
+  const sfTab = tabs.find(t => t.url && SF_PATTERN.test(t.url));
+  if (sfTab) {
+    try {
+      const origin = new URL(sfTab.url).origin;
+      orgUrl = origin;
+      await chrome.storage.session.set({ orgUrl: origin });
+      showOrgLabel(orgUrl);
+    } catch { /* ignore malformed URL */ }
   }
 }
 
